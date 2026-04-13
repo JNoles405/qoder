@@ -1,6 +1,8 @@
 // main.js — Qoder Electron main process
 const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
+const fs   = require('fs');
+const os   = require('os');
 const isDev = !app.isPackaged;
 
 app.on('remote-require', (event) => event.preventDefault());
@@ -22,6 +24,20 @@ ipcMain.handle('select-folder', async () => {
     title: 'Select Project Folder',
   });
   return result.canceled ? null : result.filePaths[0];
+});
+
+// Write HTML to a temp file and open it in the default browser for printing
+// This replaces window.open() which triggers "Get an app" on Windows
+ipcMain.handle('open-html-in-browser', async (event, html) => {
+  try {
+    const tmpPath = path.join(os.tmpdir(), `qoder-report-${Date.now()}.html`);
+    fs.writeFileSync(tmpPath, html, 'utf8');
+    await shell.openPath(tmpPath);
+    // Clean up after 60s (enough time for the print dialog)
+    setTimeout(() => { try { fs.unlinkSync(tmpPath); } catch {} }, 60000);
+  } catch (err) {
+    dialog.showErrorBox('PDF Export Error', err.message);
+  }
 });
 
 // ── Window ────────────────────────────────────────────────────────────────────
