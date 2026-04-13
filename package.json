@@ -1,6 +1,6 @@
 {
   "name": "qoder",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Track every build — version history, milestones, release links",
   "main": "main.js",
   "homepage": "https://qoder.dev",
@@ -10,7 +10,7 @@
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "npm run build && electron-builder",
     "electron:mac": "npm run build && electron-builder --mac",
-    "electron:win": "npm run build && electron-builder --win",
+    "electron:win": "npm run build && electron-builder --win --publish always",
     "electron:linux": "npm run build && electron-builder --linux",
     "cap:sync": "npm run build && npx cap sync",
     "cap:android": "npm run cap:sync && npx cap open android",
@@ -31,6 +31,11 @@
       "preload.js",
       "assets/**/*"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "JNoles405",
+      "repo": "qoder"
+    },
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.icns",
@@ -59,6 +64,7 @@
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "electron-updater": "^6.3.0",
     "@capacitor/core": "^6.0.0",
     "@capacitor/android": "^6.0.0",
     "@capacitor/ios": "^6.0.0",

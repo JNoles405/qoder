@@ -330,24 +330,61 @@ export default function QoderApp() {
   const [form,        setForm]        = useState({});
   const [search,      setSearch]      = useState("");
   const [filter,      setFilter]      = useState("all");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [tabOrder,    setTabOrder]    = useState(DEFAULT_TABS);
-  const [tagFilter,   setTagFilter]   = useState(null); // tag id or null
-  const [lightbox,    setLightbox]    = useState(null); // {url, name}
-  const [confirmState,setConfirmState]= useState(null); // {msg, resolve}
-  const [userTags,    setUserTags]    = useState([]);
-  const [templates,   setTemplates]   = useState([]);
-  const [ghCache,     setGhCache]     = useState({}); // keyed by projectId
+  const [sidebarOpen,     setSidebarOpen]     = useState(false);
+  const [sidebarWidth,    setSidebarWidth]    = useState(()=>{ try{return parseInt(localStorage.getItem("q-sidebar-w")||"240",10);}catch{return 240;} });
+  const [sidebarCollapsed,setSidebarCollapsed]= useState(()=>{ try{return localStorage.getItem("q-sidebar-c")==="1";}catch{return false;} });
+  const [updateStatus,    setUpdateStatus]    = useState(null); // null | "available" | "downloading" | "ready"
+  const [tabOrder,        setTabOrder]        = useState(DEFAULT_TABS);
+  const [tagFilter,       setTagFilter]       = useState(null);
+  const [lightbox,        setLightbox]        = useState(null);
+  const [confirmState,    setConfirmState]    = useState(null);
+  const [userTags,        setUserTags]        = useState([]);
+  const [templates,       setTemplates]       = useState([]);
+  const [ghCache,         setGhCache]         = useState({});
   const isMobile = useIsMobile();
   const projRef  = useRef(projects);
+  const sidebarDragRef = useRef(null);
   projRef.current = projects;
 
   const showToast = (msg,type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
+
+  // Sidebar resize drag
+  const startSidebarDrag = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    const onMove = (ev) => {
+      const newW = Math.min(420, Math.max(180, startW + ev.clientX - startX));
+      setSidebarWidth(newW);
+      try { localStorage.setItem("q-sidebar-w", newW); } catch {}
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const toggleSidebarCollapse = () => {
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    try { localStorage.setItem("q-sidebar-c", next ? "1" : "0"); } catch {}
+  };
 
   // Register the styled confirm dialog
   useEffect(() => {
     _confirmResolver = ({msg, resolve}) => setConfirmState({msg, resolve});
     return () => { _confirmResolver = null; };
+  }, []);
+
+  // Auto-update listeners (Electron only)
+  useEffect(() => {
+    if (!window.electronAPI?.onUpdateAvailable) return;
+    const cleanA = window.electronAPI.onUpdateAvailable(()=>setUpdateStatus("available"));
+    const cleanP = window.electronAPI.onUpdateProgress?.(()=>setUpdateStatus("downloading"));
+    const cleanR = window.electronAPI.onUpdateReady(()=>setUpdateStatus("ready"));
+    return () => { cleanA?.(); cleanP?.(); cleanR?.(); };
   }, []);
 
   // ── Boot ────────────────────────────────────────────────────────────────────
@@ -766,40 +803,83 @@ export default function QoderApp() {
   const liveProj=selProj?(projects.find(p=>p.id===selProj.id)||selProj):null;
 
   return(
-    <div style={s.root} onKeyDown={e=>{/* captured globally */}}>
+    <div style={s.root}>
       <style>{css}</style>
       {toast&&<Toast {...toast}/>}
       {lightbox&&<Lightbox url={lightbox.url} name={lightbox.name} onClose={()=>setLightbox(null)}/>}
       {confirmState&&<ConfirmDialog msg={confirmState.msg} onYes={()=>{confirmState.resolve(true);setConfirmState(null);}} onNo={()=>{confirmState.resolve(false);setConfirmState(null);}}/>}
+
+      {/* Update banner */}
+      {updateStatus==="ready"&&(
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:5000,background:"#0F2A1A",borderBottom:"1px solid #4ADE80",padding:"10px 20px",display:"flex",alignItems:"center",gap:12}}>
+          <span style={{color:"#4ADE80",fontFamily:"'Syne'",fontWeight:700,fontSize:14}}>✓ Update downloaded — restart to install</span>
+          <button className="q-btn-primary" style={{padding:"6px 16px",fontSize:13}} onClick={()=>window.electronAPI?.installUpdate?.()}>Restart Now</button>
+          <button className="q-btn-ghost" style={{padding:"6px 12px",fontSize:13}} onClick={()=>setUpdateStatus(null)}>Later</button>
+        </div>
+      )}
+      {updateStatus==="available"&&(
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:5000,background:"#0F1A2A",borderBottom:"1px solid #00D4FF",padding:"8px 20px",display:"flex",alignItems:"center",gap:12}}>
+          <span style={{color:"#00D4FF",fontFamily:"'Syne'",fontWeight:600,fontSize:13}}>↓ Update available — downloading in background</span>
+          <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12,marginLeft:"auto"}} onClick={()=>setUpdateStatus(null)}>✕</button>
+        </div>
+      )}
+
       {isMobile&&sidebarOpen&&<div style={s.mobileOverlay} onClick={()=>setSidebarOpen(false)}/>}
 
+      {/* Collapsed sidebar — slim expand strip */}
+      {!isMobile&&sidebarCollapsed&&(
+        <div style={{width:36,flexShrink:0,background:"#0C1020",borderRight:"1px solid #151C32",display:"flex",flexDirection:"column",alignItems:"center",paddingTop:16,gap:12,position:"sticky",top:0,height:"100vh",zIndex:1}}>
+          <div style={{fontFamily:"'Syne'",fontSize:16,fontWeight:800,color:"#00D4FF",lineHeight:1}}>Q</div>
+          <button onClick={toggleSidebarCollapse} title="Expand sidebar" style={{color:"#6B7290",fontSize:18,background:"none",border:"none",cursor:"pointer",marginTop:4}}>›</button>
+        </div>
+      )}
+
       {/* Sidebar */}
-      <aside style={{...s.sidebar,transform:isMobile?(sidebarOpen?"translateX(0)":"translateX(-100%)"):"translateX(0)",transition:"transform .25s ease",position:isMobile?"fixed":"sticky",zIndex:isMobile?200:1}}>
-        <div style={s.logo}>
-          <span style={s.logoQ}>Q</span><span style={s.logoText}>oder</span>
-          <span style={s.logoBeta}>{APP_VER}</span>
-          {isMobile&&<button style={s.closeSidebar} onClick={()=>setSidebarOpen(false)}>✕</button>}
-        </div>
-        <nav style={s.nav}>
-          <NavBtn active={view==="dashboard"} onClick={()=>{setView("dashboard");if(isMobile)setSidebarOpen(false);}} icon="◈" label="Dashboard"/>
-          {projects.length>0&&<>
-            <div style={s.navSection}>Projects</div>
-            <DraggableSidebarList items={projects} onReorder={reorderProjects}>
-              {p=><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} small/>}
-            </DraggableSidebarList>
-          </>}
-        </nav>
-        <div style={s.sidebarFoot}>
-          <button className="q-btn-new" onClick={()=>{openModal("settings",{});if(isMobile)setSidebarOpen(false);}}>+ New Project</button>
-          <div style={{marginTop:10,display:"flex",gap:8,justifyContent:"space-between",alignItems:"center"}}>
-            <span style={s.userEmail}>{session.user.email}</span>
+      {(!sidebarCollapsed||isMobile)&&(
+        <aside style={{
+          ...s.sidebar,
+          width: isMobile ? 240 : sidebarWidth,
+          minWidth: isMobile ? 240 : sidebarWidth,
+          transform: isMobile?(sidebarOpen?"translateX(0)":"translateX(-100%)"):"translateX(0)",
+          transition: isMobile ? "transform .25s ease" : "none",
+          position: isMobile ? "fixed" : "sticky",
+          zIndex: isMobile ? 200 : 1,
+        }}>
+          <div style={s.logo}>
+            <span style={s.logoQ}>Q</span><span style={s.logoText}>oder</span>
+            <span style={s.logoBeta}>{APP_VER}</span>
+            {isMobile
+              ? <button style={s.closeSidebar} onClick={()=>setSidebarOpen(false)}>✕</button>
+              : <button onClick={toggleSidebarCollapse} title="Collapse sidebar" style={{marginLeft:"auto",color:"#4B5268",fontSize:16,padding:"0 4px",background:"none",border:"none",cursor:"pointer",lineHeight:1}}>‹</button>
+            }
           </div>
-          <div style={{display:"flex",gap:6,marginTop:8}}>
-            <button className="q-icon-btn" style={{flex:1,textAlign:"center"}} title="Settings" onClick={()=>openModal("settings",{})}>⚙ Settings</button>
-            <button className="q-sign-out" title="Sign out" onClick={handleSignOut}>⎋</button>
+          <nav style={s.nav}>
+            <NavBtn active={view==="dashboard"} onClick={()=>{setView("dashboard");if(isMobile)setSidebarOpen(false);}} icon="◈" label="Dashboard"/>
+            {projects.length>0&&<>
+              <div style={s.navSection}>Projects</div>
+              <DraggableSidebarList items={projects} onReorder={reorderProjects}>
+                {p=><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} small/>}
+              </DraggableSidebarList>
+            </>}
+          </nav>
+          <div style={s.sidebarFoot}>
+            <button className="q-btn-new" onClick={()=>{openModal("add-project",{status:"planning",techStack:[],tagIds:[]});if(isMobile)setSidebarOpen(false);}}>+ New Project</button>
+            <div style={{marginTop:10,display:"flex",gap:8,justifyContent:"space-between",alignItems:"center"}}>
+              <span style={s.userEmail}>{session.user.email}</span>
+            </div>
+            <div style={{display:"flex",gap:6,marginTop:8}}>
+              <button className="q-icon-btn" style={{flex:1,textAlign:"center"}} title="Settings" onClick={()=>openModal("settings",{})}>⚙ Settings</button>
+              <button className="q-sign-out" title="Sign out" onClick={handleSignOut}>⎋</button>
+            </div>
           </div>
-        </div>
-      </aside>
+          {/* Drag handle — desktop only */}
+          {!isMobile&&(
+            <div onMouseDown={startSidebarDrag} style={{position:"absolute",top:0,right:0,width:5,height:"100%",cursor:"col-resize",background:"transparent",zIndex:10}}
+              onMouseEnter={e=>e.currentTarget.style.background="rgba(0,212,255,.15)"}
+              onMouseLeave={e=>e.currentTarget.style.background="transparent"}/>
+          )}
+        </aside>
+      )}
 
       {/* Main */}
       <main style={s.main}>
@@ -2111,7 +2191,7 @@ const css=`
   .q-tab-arrow-left{left:0;color:#6B7290;background:linear-gradient(to right,#0A0E1A 55%,transparent);}
   .q-tab-arrow-right{right:0;color:#6B7290;background:linear-gradient(to left,#0A0E1A 55%,transparent);}
 
-  .q-nav{display:flex;align-items:center;padding:8px 14px;color:#8B8FA8;font-family:'Syne',sans-serif;font-weight:500;width:calc(100% - 16px);margin:1px 8px;border-radius:7px;cursor:pointer;transition:all .15s;user-select:none;}
+  .q-nav{display:flex;align-items:center;padding:8px 14px;color:#8B8FA8;font-family:'Syne',sans-serif;font-weight:500;width:calc(100% - 16px);margin:1px 8px;border-radius:7px;cursor:pointer;transition:all .15s;user-select:none;font-size:14px;}
   .q-nav:hover{background:rgba(0,212,255,.06);color:#D0D3E8;}
   .q-nav-active{background:rgba(0,212,255,.09)!important;color:#00D4FF!important;}
   .q-folder-btn{margin-left:4px;opacity:0;transition:opacity .15s;padding:3px 4px;border-radius:4px;flex-shrink:0;display:flex;align-items:center;background:none;border:none;cursor:pointer;}
@@ -2120,52 +2200,52 @@ const css=`
   .q-proj-link{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.18);border-radius:6px;color:#00D4FF;font-size:12px;font-family:'Syne';font-weight:600;transition:all .15s;}
   .q-proj-link:hover{background:rgba(0,212,255,.12);border-color:rgba(0,212,255,.35);}
 
-  .q-btn-primary{padding:9px 18px;background:#00D4FF;color:#06090F;border-radius:8px;font-size:13px;font-weight:700;font-family:'Syne',sans-serif;transition:opacity .15s;}.q-btn-primary:hover{opacity:.88;}
-  .q-btn-ghost{padding:9px 14px;border:1px solid #1E2540;border-radius:8px;color:#8B8FA8;font-size:13px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-ghost:hover{border-color:#2E3560;color:#C0C6E0;}
-  .q-btn-danger{padding:9px 14px;border:1px solid #1E2540;border-radius:8px;color:#8B8FA8;font-size:13px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-danger:hover{border-color:#FF4466;color:#FF4466;}
-  .q-btn-new{width:100%;padding:10px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.2);border-radius:8px;color:#00D4FF;font-size:13px;font-weight:600;font-family:'Syne',sans-serif;transition:all .15s;}.q-btn-new:hover{background:rgba(0,212,255,.14);border-color:rgba(0,212,255,.35);}
+  .q-btn-primary{padding:9px 18px;background:#00D4FF;color:#06090F;border-radius:8px;font-size:14px;font-weight:700;font-family:'Syne',sans-serif;transition:opacity .15s;}.q-btn-primary:hover{opacity:.88;}
+  .q-btn-ghost{padding:9px 14px;border:1px solid #1E2540;border-radius:8px;color:#8B8FA8;font-size:14px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-ghost:hover{border-color:#2E3560;color:#C0C6E0;}
+  .q-btn-danger{padding:9px 14px;border:1px solid #1E2540;border-radius:8px;color:#8B8FA8;font-size:14px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-danger:hover{border-color:#FF4466;color:#FF4466;}
+  .q-btn-new{width:100%;padding:10px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.2);border-radius:8px;color:#00D4FF;font-size:14px;font-weight:600;font-family:'Syne',sans-serif;transition:all .15s;}.q-btn-new:hover{background:rgba(0,212,255,.14);border-color:rgba(0,212,255,.35);}
   .q-sign-out{color:#4B5268;font-size:16px;padding:7px 10px;border:1px solid #1A2040;border-radius:8px;transition:all .15s;}.q-sign-out:hover{color:#FF6B9D;border-color:#FF4466;}
-  .q-icon-btn{color:#8B8FA8;font-size:16px;padding:7px 10px;border:1px solid #1A2040;border-radius:8px;transition:all .15s;font-family:'Syne';font-weight:600;}.q-icon-btn:hover{color:#E8EAF6;border-color:#2E3560;background:rgba(255,255,255,.03);}
+  .q-icon-btn{color:#8B8FA8;font-size:14px;padding:7px 10px;border:1px solid #1A2040;border-radius:8px;transition:all .15s;font-family:'Syne';font-weight:600;}.q-icon-btn:hover{color:#E8EAF6;border-color:#2E3560;background:rgba(255,255,255,.03);}
   .q-input{width:100%;background:#0D1120;border:1px solid #1E2540;border-radius:8px;padding:10px 13px;color:#E8EAF6;font-size:14px;font-family:'Syne',sans-serif;transition:border-color .15s;margin-top:6px;}.q-input:focus{border-color:rgba(0,212,255,.4);}
   .q-mono{font-family:'JetBrains Mono',monospace!important;}
-  .q-chip{padding:4px 10px;background:#111627;border:1px solid #1E2540;border-radius:20px;color:#6B7290;font-size:12px;font-family:'Syne',sans-serif;transition:all .15s;}.q-chip:hover{border-color:rgba(0,212,255,.3);color:#C0C6E0;}.q-chip-on{background:rgba(0,212,255,.1)!important;border-color:rgba(0,212,255,.35)!important;color:#00D4FF!important;}
+  .q-chip{padding:5px 11px;background:#111627;border:1px solid #1E2540;border-radius:20px;color:#6B7290;font-size:12px;font-family:'Syne',sans-serif;transition:all .15s;}.q-chip:hover{border-color:rgba(0,212,255,.3);color:#C0C6E0;}.q-chip-on{background:rgba(0,212,255,.1)!important;border-color:rgba(0,212,255,.35)!important;color:#00D4FF!important;}
   .q-card{background:#111627;border:1px solid #1A2040;border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;}.q-card:hover{border-color:rgba(0,212,255,.28);transform:translateY(-2px);background:#131929;}
   .q-ver-card{background:#111627;border:1px solid #1A2040;border-radius:10px;padding:18px 20px;transition:border-color .2s;}.q-ver-card:hover{border-color:rgba(0,212,255,.2);}
   .q-ms-row{display:flex;align-items:flex-start;gap:12px;padding:10px 8px;border-radius:8px;transition:background .15s;}.q-ms-row:hover{background:rgba(255,255,255,.025);}
-  .q-check{width:20px;height:20px;min-width:20px;border:2px solid #2A3050;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#4ADE80;margin-top:1px;transition:all .15s;flex-shrink:0;}.q-check:hover{border-color:#4ADE80;}.q-check-done{background:rgba(74,222,128,.1);border-color:#4ADE80;}
-  .q-del{color:#3A3F58;font-size:12px;padding:2px 4px;transition:color .15s;flex-shrink:0;}.q-del:hover{color:#FF4466;}
+  .q-check{width:22px;height:22px;min-width:22px;border:2px solid #2A3050;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#4ADE80;margin-top:1px;transition:all .15s;flex-shrink:0;}.q-check:hover{border-color:#4ADE80;}.q-check-done{background:rgba(74,222,128,.1);border-color:#4ADE80;}
+  .q-del{color:#3A3F58;font-size:13px;padding:3px 5px;transition:color .15s;flex-shrink:0;}.q-del:hover{color:#FF4466;}
   .q-tab{padding:10px 18px;color:#6B7290;font-size:13px;font-weight:500;font-family:'Syne',sans-serif;border-bottom:2px solid transparent;border-top:none;border-left:none;border-right:none;background:none;margin-bottom:-1px;display:inline-flex;align-items:center;gap:5px;transition:all .15s;white-space:nowrap;}.q-tab:hover{color:#C0C6E0;}.q-tab-on{color:#00D4FF!important;border-bottom-color:#00D4FF!important;}
   .q-modal-submit{}
 `;
 
 const s={
   root:{display:"flex",minHeight:"100vh",background:"#0A0E1A",fontFamily:"'Syne',sans-serif",color:"#E8EAF6"},
-  sidebar:{width:228,minWidth:228,background:"#0C1020",borderRight:"1px solid #151C32",display:"flex",flexDirection:"column",top:0,height:"100vh",overflowY:"auto"},
-  logo:{padding:"20px 20px 16px",borderBottom:"1px solid #151C32",display:"flex",alignItems:"baseline",gap:3,marginBottom:8},
+  sidebar:{background:"#0C1020",borderRight:"1px solid #151C32",display:"flex",flexDirection:"column",top:0,height:"100vh",overflowY:"auto",position:"relative",flexShrink:0},
+  logo:{padding:"20px 16px 16px",borderBottom:"1px solid #151C32",display:"flex",alignItems:"baseline",gap:3,marginBottom:8},
   logoQ:{fontFamily:"'Syne'",fontSize:26,fontWeight:800,color:"#00D4FF",lineHeight:1},
   logoText:{fontFamily:"'Syne'",fontSize:20,fontWeight:700,color:"#E8EAF6",letterSpacing:"-.5px"},
   logoBeta:{fontFamily:"'JetBrains Mono'",fontSize:9,color:"#3A4060",marginLeft:4,letterSpacing:1.5,fontWeight:700},
   closeSidebar:{marginLeft:"auto",color:"#4B5268",fontSize:16,padding:"0 4px",background:"none",border:"none",cursor:"pointer"},
   nav:{flex:1,padding:"4px 0",overflowY:"auto"},
-  navSection:{fontSize:10,fontWeight:700,letterSpacing:"1.5px",color:"#2E3558",padding:"14px 20px 5px",textTransform:"uppercase"},
+  navSection:{fontSize:11,fontWeight:700,letterSpacing:"1.5px",color:"#2E3558",padding:"14px 20px 5px",textTransform:"uppercase"},
   sidebarFoot:{padding:14,borderTop:"1px solid #151C32"},
   userRow:{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,gap:4},
   userEmail:{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#2A304A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1},
   mobileOverlay:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:199},
   mobileHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"#0C1020",borderBottom:"1px solid #151C32",position:"sticky",top:0,zIndex:10},
   hamburger:{fontSize:20,color:"#8B8FA8",padding:"0 6px",width:32,background:"none",border:"none",cursor:"pointer"},
-  main:{flex:1,overflowY:"auto",maxHeight:"100vh"},
-  page:{padding:"36px 40px",maxWidth:1000},
+  main:{flex:1,overflowY:"auto",maxHeight:"100vh",minWidth:0},
+  page:{padding:"32px 40px"},  // no maxWidth — fills the full available space
   pageHead:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:26},
-  pageTitle:{fontFamily:"'Syne'",fontSize:27,fontWeight:800,color:"#E8EAF6",letterSpacing:"-.5px"},
-  pageSub:{color:"#8B8FA8",fontSize:13,marginTop:3},
+  pageTitle:{fontFamily:"'Syne'",fontSize:28,fontWeight:800,color:"#E8EAF6",letterSpacing:"-.5px"},
+  pageSub:{color:"#8B8FA8",fontSize:14,marginTop:3},
   projHead:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16},
   statsGrid:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14},
   statCard:{background:"#111627",border:"1px solid #1A2040",borderRadius:10,padding:"14px 16px"},
-  statVal:{fontFamily:"'JetBrains Mono'",fontSize:26,fontWeight:700,lineHeight:1},
-  statLbl:{color:"#6B7290",fontSize:11,marginTop:5,fontWeight:500,letterSpacing:".3px"},
-  grid:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))",gap:13},
-  empty:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14,padding:"48px 20px",color:"#6B7290",fontSize:14},
+  statVal:{fontFamily:"'JetBrains Mono'",fontSize:28,fontWeight:700,lineHeight:1},
+  statLbl:{color:"#6B7290",fontSize:12,marginTop:5,fontWeight:500,letterSpacing:".3px"},
+  grid:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:13},
+  empty:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14,padding:"48px 20px",color:"#6B7290",fontSize:15},
   emptyIcon:{fontSize:44,opacity:.18},
   badge:{fontSize:11,fontWeight:600,padding:"3px 8px",borderRadius:4,fontFamily:"'JetBrains Mono'",letterSpacing:".3px"},
   mono12:{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#6B7290"},
@@ -2174,15 +2254,15 @@ const s={
   bar:{flex:1,height:4,background:"#1A2040",borderRadius:2,overflow:"hidden"},
   barFill:{height:4,background:"linear-gradient(90deg,#00D4FF,#4ADE80)",borderRadius:2},
   cardTitle:{fontFamily:"'Syne'",fontSize:16,fontWeight:700,marginBottom:6,color:"#E8EAF6"},
-  cardDesc:{fontSize:13,color:"#8B8FA8",lineHeight:1.5,marginBottom:12,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"},
+  cardDesc:{fontSize:14,color:"#8B8FA8",lineHeight:1.5,marginBottom:12,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"},
   tabPill:{fontSize:10,background:"rgba(0,212,255,.09)",color:"#00D4FF",padding:"1px 6px",borderRadius:10,fontFamily:"'JetBrains Mono'"},
   tabBar:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16},
   infoCard:{background:"#111627",border:"1px solid #1A2040",borderRadius:10,padding:"15px 17px"},
-  infoLbl:{fontSize:10,color:"#6B7290",fontWeight:700,letterSpacing:".8px",textTransform:"uppercase"},
+  infoLbl:{fontSize:11,color:"#6B7290",fontWeight:700,letterSpacing:".8px",textTransform:"uppercase"},
   fileLink:{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#00D4FF",background:"rgba(0,212,255,.06)",border:"1px solid rgba(0,212,255,.14)",borderRadius:4,padding:"4px 8px",display:"inline-block"},
   overlayBackdrop:{position:"fixed",inset:0,background:"rgba(4,6,14,.88)",zIndex:1000},
-  modalCentered:{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1001,background:"#111627",border:"1px solid #1E2540",borderRadius:14,padding:26,width:"90%",maxWidth:540,maxHeight:"90vh",overflowY:"auto"},
-  modalTitle:{fontFamily:"'Syne'",fontSize:19,fontWeight:700,marginBottom:18,color:"#E8EAF6"},
+  modalCentered:{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1001,background:"#111627",border:"1px solid #1E2540",borderRadius:14,padding:26,width:"90%",maxWidth:560,maxHeight:"90vh",overflowY:"auto"},
+  modalTitle:{fontFamily:"'Syne'",fontSize:20,fontWeight:700,marginBottom:18,color:"#E8EAF6"},
   fieldLbl:{display:"block",fontSize:11,fontWeight:700,color:"#6B7290",letterSpacing:".7px",textTransform:"uppercase",marginBottom:0},
   authWrap:{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#0A0E1A",padding:20},
   authBox:{width:"100%",maxWidth:420,background:"#0C1020",border:"1px solid #1A2040",borderRadius:16,padding:30},

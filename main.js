@@ -1,23 +1,29 @@
 // main.js — Qoder Electron main process
 const { app, BrowserWindow, Menu, shell, dialog, ipcMain } = require('electron');
-const path = require('path');
-const fs   = require('fs');
-const os   = require('os');
-const isDev = !app.isPackaged;
+const path   = require('path');
+const fs     = require('fs');
+const os     = require('os');
+const isDev  = !app.isPackaged;
+
+// Auto-updater — only active in production builds
+let autoUpdater;
+try {
+  ({ autoUpdater } = require('electron-updater'));
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+} catch { /* electron-updater not installed yet — safe to ignore in dev */ }
 
 app.on('remote-require', (event) => event.preventDefault());
 app.on('remote-get-global', (event) => event.preventDefault());
 
 // ── IPC Handlers ──────────────────────────────────────────────────────────────
 
-// Open a folder in the system file explorer
 ipcMain.handle('open-folder', async (event, folderPath) => {
   if (!folderPath) return;
   const err = await shell.openPath(folderPath);
   if (err) dialog.showErrorBox('Could not open folder', err);
 });
 
-// Show a native folder picker dialog, return selected path
 ipcMain.handle('select-folder', async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
@@ -26,27 +32,35 @@ ipcMain.handle('select-folder', async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
-// Write HTML to a temp file and open it in the default browser for printing
-// This replaces window.open() which triggers "Get an app" on Windows
 ipcMain.handle('open-html-in-browser', async (event, html) => {
   try {
     const tmpPath = path.join(os.tmpdir(), `qoder-report-${Date.now()}.html`);
     fs.writeFileSync(tmpPath, html, 'utf8');
     await shell.openPath(tmpPath);
-    // Clean up after 60s (enough time for the print dialog)
     setTimeout(() => { try { fs.unlinkSync(tmpPath); } catch {} }, 60000);
   } catch (err) {
     dialog.showErrorBox('PDF Export Error', err.message);
   }
 });
 
+ipcMain.handle('check-for-updates', () => {
+  if (autoUpdater && !isDev) autoUpdater.checkForUpdates();
+});
+
+ipcMain.handle('install-update', () => {
+  if (autoUpdater) autoUpdater.quitAndInstall();
+});
+
 // ── Window ────────────────────────────────────────────────────────────────────
+let mainWindow;
+
 function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 860,
     minWidth: 900,
     minHeight: 600,
+    show: false, // show after ready-to-show to avoid white flash
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     ...(process.platform === 'win32' ? {
       titleBarOverlay: {
@@ -65,19 +79,33 @@ function createWindow() {
     },
   });
 
+  // Open maximized so the full screen is used from the start
+  mainWindow.maximize();
+  mainWindow.show();
+
   if (isDev) {
-    win.loadURL('http://localhost:5173');
-    win.webContents.openDevTools();
+    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.webContents.openDevTools();
   } else {
-    win.loadFile(path.join(__dirname, 'dist', 'index.html'));
+    mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
   }
 
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  return win;
+  // Wire up auto-updater events → renderer
+  if (autoUpdater && !isDev) {
+    autoUpdater.on('update-available',    () => mainWindow?.webContents.send('update-available'));
+    autoUpdater.on('download-progress',   () => mainWindow?.webContents.send('update-progress'));
+    autoUpdater.on('update-downloaded',   () => mainWindow?.webContents.send('update-ready'));
+    autoUpdater.on('error', (err)         => console.error('Updater error:', err));
+    // Check on startup after a short delay
+    setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch {} }, 8000);
+  }
+
+  return mainWindow;
 }
 
 // ── App Menu ──────────────────────────────────────────────────────────────────
