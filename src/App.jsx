@@ -14,8 +14,8 @@ function useIsMobile() {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.0.4";
-const POLL_MS    = 30000;
+const APP_VER    = "v0.1.0";
+const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
 const STATUS_CONFIG = {
@@ -61,7 +61,14 @@ const DEFAULT_TABS=[
   {key:"concepts",  label:"Concepts"  },
 ];
 
-// ── Folder SVG ────────────────────────────────────────────────────────────────
+// ── Styled confirm dialog (replaces native confirm()) ─────────────────────────
+// Module-level slot — root component sets this on mount
+let _confirmResolver = null;
+async function qConfirm(msg) {
+  if (!_confirmResolver) return window.confirm(msg);
+  return new Promise(resolve => _confirmResolver({ msg, resolve }));
+}
+
 function FolderIcon({size=13}){return(<svg width={size} height={size} viewBox="0 0 20 16" fill="none"><path d="M1 2.5C1 1.67 1.67 1 2.5 1H7.5L9.5 3.5H17.5C18.33 3.5 19 4.17 19 5V13.5C19 14.33 18.33 15 17.5 15H2.5C1.67 15 1 14.33 1 13.5V2.5Z" fill="#00d3fe" fillOpacity="0.18" stroke="#00d3fe" strokeWidth="1.4" strokeLinejoin="round"/></svg>);}
 
 // ── Supabase client ───────────────────────────────────────────────────────────
@@ -137,11 +144,18 @@ export default function QoderApp() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [tabOrder,    setTabOrder]    = useState(DEFAULT_TABS);
   const [lightbox,    setLightbox]    = useState(null); // {url, name}
+  const [confirmState,setConfirmState]= useState(null); // {msg, resolve}
   const isMobile = useIsMobile();
   const projRef  = useRef(projects);
   projRef.current = projects;
 
   const showToast = (msg,type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
+
+  // Register the styled confirm dialog
+  useEffect(() => {
+    _confirmResolver = ({msg, resolve}) => setConfirmState({msg, resolve});
+    return () => { _confirmResolver = null; };
+  }, []);
 
   // ── Boot ────────────────────────────────────────────────────────────────────
   useEffect(()=>{
@@ -392,6 +406,7 @@ export default function QoderApp() {
       <style>{css}</style>
       {toast&&<Toast {...toast}/>}
       {lightbox&&<Lightbox url={lightbox.url} name={lightbox.name} onClose={()=>setLightbox(null)}/>}
+      {confirmState&&<ConfirmDialog msg={confirmState.msg} onYes={()=>{confirmState.resolve(true);setConfirmState(null);}} onNo={()=>{confirmState.resolve(false);setConfirmState(null);}}/>}
       {isMobile&&sidebarOpen&&<div style={s.mobileOverlay} onClick={()=>setSidebarOpen(false)}/>}
 
       {/* Sidebar */}
@@ -456,7 +471,7 @@ export default function QoderApp() {
             onUploadConceptFile={(file,label,type)=>uploadConceptFile(liveProj.id,file,label,type)}
             onLightbox={(url,name)=>setLightbox({url,name})}
             onEdit={()=>openModal("edit-project",{...liveProj})}
-            onDelete={()=>{if(confirm("Delete this project?"))deleteProject(liveProj.id);}}/>
+            onDelete={async()=>{if(await qConfirm("Delete this project? This cannot be undone."))deleteProject(liveProj.id);}}/>
         )}
       </main>
 
@@ -692,7 +707,7 @@ function VersionsTab({project,onAdd,onDelete}){
             <div key={v.id} className="q-ver-card">
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                 <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontFamily:"'JetBrains Mono'",color:"#00D4FF",fontWeight:700,fontSize:16}}>{v.version}</span>{i===0&&<span style={{...s.badge,color:"#4ADE80",background:"rgba(74,222,128,0.1)",fontSize:10}}>Latest</span>}</div>
-                <div style={{display:"flex",alignItems:"center",gap:10}}><span style={s.mono10}>{new Date(v.date).toLocaleDateString()}</span><button className="q-del" onClick={()=>{if(confirm("Remove?"))onDelete(v.id);}}>✕</button></div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}><span style={s.mono10}>{new Date(v.date).toLocaleDateString()}</span><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this version?"))onDelete(v.id);}}>✕</button></div>
               </div>
               {v.releaseNotes&&<p style={{color:"#B8BDD4",fontSize:14,lineHeight:1.65,marginBottom:10}}>{v.releaseNotes}</p>}
               {v.fileLinks?.filter(l=>l).length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:7}}>{v.fileLinks.filter(l=>l).map((link,j)=><a key={j} href={link} target="_blank" rel="noreferrer" style={s.fileLink}>↗ {decodeURIComponent(link.split("/").pop()?.split("?")[0]||`File ${j+1}`).slice(0,42)}</a>)}</div>}
@@ -718,7 +733,7 @@ function MilestonesTab({project,onAdd,onToggle,onDelete}){
               <button className={`q-check${m.completed?" q-check-done":""}`} onClick={()=>onToggle(m.id)}>{m.completed&&"✓"}</button>
               <div style={{flex:1}}><span style={{color:"#E8EAF6",fontWeight:500,textDecoration:m.completed?"line-through":"none",fontSize:14}}>{m.title}</span>{m.description&&<p style={{color:"#8B8FA8",fontSize:12,marginTop:2}}>{m.description}</p>}</div>
               {m.date&&<span style={{...s.mono10,whiteSpace:"nowrap",color:new Date(m.date)<new Date()&&!m.completed?"#FF6B9D":"#8B8FA8"}}>{new Date(m.date).toLocaleDateString()}</span>}
-              <button className="q-del" onClick={()=>{if(confirm("Remove?"))onDelete(m.id);}}>✕</button>
+              <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this milestone?"))onDelete(m.id);}}>✕</button>
             </div>
           ))}
         </div>
@@ -737,8 +752,8 @@ function TodoTab({project,onAdd,onToggle,onDelete,onReorder}){
       <div style={s.tabBar}><span style={s.mono12}>{done.length}/{todos.length} completed</span></div>
       <div style={{display:"flex",gap:8,marginBottom:18}}><input className="q-input" style={{flex:1,marginTop:0}} value={newText} onChange={e=>setNewText(e.target.value)} placeholder="Add a to-do…" onKeyDown={e=>e.key==="Enter"&&handleAdd()}/><button className="q-btn-primary" style={{flexShrink:0,padding:"0 16px"}} onClick={handleAdd}>Add</button></div>
       {todos.length===0&&<div style={s.empty}><p>No to-do items yet.</p></div>}
-      {pending.length>0&&<DraggableList items={pending} onReorder={r=>onReorder([...r,...done])}>{todo=><TodoRow todo={todo} onToggle={()=>onToggle(todo.id)} onDelete={()=>{if(confirm("Remove?"))onDelete(todo.id);}}/>}</DraggableList>}
-      {done.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",padding:"14px 0 6px",fontWeight:700}}>Completed ({done.length})</div>{done.map(todo=><TodoRow key={todo.id} todo={todo} onToggle={()=>onToggle(todo.id)} onDelete={()=>{if(confirm("Remove?"))onDelete(todo.id);}}/>)}</>}
+      {pending.length>0&&<DraggableList items={pending} onReorder={r=>onReorder([...r,...done])}>{todo=><TodoRow todo={todo} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}}/>}</DraggableList>}
+      {done.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",padding:"14px 0 6px",fontWeight:700}}>Completed ({done.length})</div>{done.map(todo=><TodoRow key={todo.id} todo={todo} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}}/>)}</>}
     </div>
   );
 }
@@ -747,7 +762,7 @@ function TodoRow({todo,onToggle,onDelete}){return(<div className="q-ms-row" styl
 // ── Notes Tab ─────────────────────────────────────────────────────────────────
 function NotesTab({project,onAdd,onEdit,onDelete,onReorder}){
   const notes=project.notes||[];
-  return(<div><div style={s.tabBar}><span style={s.mono12}>{notes.length} {notes.length===1?"note":"notes"}</span><button className="q-btn-primary" onClick={onAdd}>+ Add Note</button></div>{notes.length===0?<div style={s.empty}><p>No notes yet.</p></div>:(<DraggableList items={notes} onReorder={onReorder}>{note=><div className="q-ver-card" style={{marginBottom:10}}><div style={{display:"flex",gap:10,alignItems:"flex-start"}}><span style={{color:"#3A4060",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span><p style={{color:"#B8BDD4",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap",flex:1}}>{note.content}</p><div style={{display:"flex",gap:6,flexShrink:0}}><button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit(note)}>Edit</button><button className="q-del" onClick={()=>{if(confirm("Delete?"))onDelete(note.id);}}>✕</button></div></div><div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>{new Date(note.createdAt).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"})}</div></div>}</DraggableList>)}</div>);
+  return(<div><div style={s.tabBar}><span style={s.mono12}>{notes.length} {notes.length===1?"note":"notes"}</span><button className="q-btn-primary" onClick={onAdd}>+ Add Note</button></div>{notes.length===0?<div style={s.empty}><p>No notes yet.</p></div>:(<DraggableList items={notes} onReorder={onReorder}>{note=><div className="q-ver-card" style={{marginBottom:10}}><div style={{display:"flex",gap:10,alignItems:"flex-start"}}><span style={{color:"#3A4060",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span><p style={{color:"#B8BDD4",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap",flex:1}}>{note.content}</p><div style={{display:"flex",gap:6,flexShrink:0}}><button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit(note)}>Edit</button><button className="q-del" onClick={async()=>{if(await qConfirm("Delete this note?"))onDelete(note.id);}}>✕</button></div></div><div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>{new Date(note.createdAt).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"})}</div></div>}</DraggableList>)}</div>);
 }
 
 // ── Assets Tab ────────────────────────────────────────────────────────────────
@@ -780,7 +795,7 @@ function AssetsTab({project,onAdd,onDelete,onUploadFile,onLightbox}){
                       <div style={{color:"#E8EAF6",fontWeight:500,fontSize:14}}>{asset.name}</div>
                       <a href={asset.url} target="_blank" rel="noreferrer" style={{...s.fileLink,marginTop:4,display:"inline-block",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>↗ {asset.url.length>60?asset.url.slice(0,60)+"…":asset.url}</a>
                     </div>
-                    <button className="q-del" onClick={()=>{if(confirm("Remove?"))onDelete(asset.id);}}>✕</button>
+                    <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this asset?"))onDelete(asset.id);}}>✕</button>
                   </div>
                 ))}
               </div>
@@ -803,11 +818,11 @@ function IssuesTab({project,onAdd,onFix,onDelete}){
         <div key={iss.id} className="q-ver-card">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
             <div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><span style={{width:8,height:8,borderRadius:"50%",background:"#FF6B9D",flexShrink:0,display:"inline-block"}}/><span style={{color:"#E8EAF6",fontWeight:600,fontSize:14}}>{iss.title}</span></div>{iss.description&&<p style={{color:"#8B8FA8",fontSize:13,lineHeight:1.6,marginLeft:16}}>{iss.description}</p>}<div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>Logged {new Date(iss.createdAt).toLocaleDateString()}</div></div>
-            <div style={{display:"flex",gap:6,flexShrink:0}}><button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12,borderColor:"rgba(74,222,128,.25)",color:"#4ADE80"}} onClick={()=>onFix(iss)}>Mark Fixed</button><button className="q-del" onClick={()=>{if(confirm("Remove?"))onDelete(iss.id);}}>✕</button></div>
+            <div style={{display:"flex",gap:6,flexShrink:0}}><button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12,borderColor:"rgba(74,222,128,.25)",color:"#4ADE80"}} onClick={()=>onFix(iss)}>Mark Fixed</button><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button></div>
           </div>
         </div>
       ))}</div>}
-      {fixed.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Fixed ({fixed.length})</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{fixed.map(iss=>(<div key={iss.id} className="q-ms-row" style={{opacity:.55}}><span style={{width:8,height:8,borderRadius:"50%",background:"#4ADE80",flexShrink:0,marginTop:5}}/><div style={{flex:1}}><span style={{color:"#E8EAF6",fontSize:13,fontWeight:500,textDecoration:"line-through"}}>{iss.title}</span>{iss.fixDescription&&<p style={{color:"#6B7290",fontSize:12,marginTop:2}}>{iss.fixDescription}</p>}<div style={{...s.mono10,marginTop:3,color:"#2E3558"}}>{iss.fixedAt?new Date(iss.fixedAt).toLocaleDateString():""}</div></div><button className="q-del" onClick={()=>{if(confirm("Remove?"))onDelete(iss.id);}}>✕</button></div>))}</div></>}
+      {fixed.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Fixed ({fixed.length})</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{fixed.map(iss=>(<div key={iss.id} className="q-ms-row" style={{opacity:.55}}><span style={{width:8,height:8,borderRadius:"50%",background:"#4ADE80",flexShrink:0,marginTop:5}}/><div style={{flex:1}}><span style={{color:"#E8EAF6",fontSize:13,fontWeight:500,textDecoration:"line-through"}}>{iss.title}</span>{iss.fixDescription&&<p style={{color:"#6B7290",fontSize:12,marginTop:2}}>{iss.fixDescription}</p>}<div style={{...s.mono10,marginTop:3,color:"#2E3558"}}>{iss.fixedAt?new Date(iss.fixedAt).toLocaleDateString():""}</div></div><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button></div>))}</div></>}
     </div>
   );
 }
@@ -819,8 +834,8 @@ function IdeasTab({project,onAdd,onEdit,onPin,onDelete,onReorder}){
     <div>
       <div style={s.tabBar}><span style={s.mono12}>{ideas.length} {ideas.length===1?"idea":"ideas"} · {pinned.length} pinned</span><button className="q-btn-primary" onClick={onAdd}>+ Add Idea</button></div>
       {ideas.length===0&&<div style={s.empty}><p>No ideas yet.</p></div>}
-      {pinned.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#FFB347",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>⭐ Pinned</div>{pinned.map(idea=><IdeaRow key={idea.id} idea={idea} onPin={()=>onPin(idea.id)} onEdit={()=>onEdit(idea)} onDelete={()=>{if(confirm("Remove?"))onDelete(idea.id);}}/>)}{rest.length>0&&<div style={{height:1,background:"#1A2040",margin:"16px 0"}}/>}</>}
-      {rest.length>0&&<DraggableList items={rest} onReorder={r=>onReorder([...pinned,...r])}>{idea=><IdeaRow idea={idea} onPin={()=>onPin(idea.id)} onEdit={()=>onEdit(idea)} onDelete={()=>{if(confirm("Remove?"))onDelete(idea.id);}}/>}</DraggableList>}
+      {pinned.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#FFB347",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>⭐ Pinned</div>{pinned.map(idea=><IdeaRow key={idea.id} idea={idea} onPin={()=>onPin(idea.id)} onEdit={()=>onEdit(idea)} onDelete={async()=>{if(await qConfirm("Remove this idea?"))onDelete(idea.id);}}/>)}{rest.length>0&&<div style={{height:1,background:"#1A2040",margin:"16px 0"}}/>}</>}
+      {rest.length>0&&<DraggableList items={rest} onReorder={r=>onReorder([...pinned,...r])}>{idea=><IdeaRow idea={idea} onPin={()=>onPin(idea.id)} onEdit={()=>onEdit(idea)} onDelete={async()=>{if(await qConfirm("Remove this idea?"))onDelete(idea.id);}}/>}</DraggableList>}
     </div>
   );
 }
@@ -850,7 +865,7 @@ function ConceptsTab({project,onAdd,onDelete,onUploadFile,onLightbox}){
             <div key={type}>
               <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>{CONCEPT_ICONS[type]} {type}</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>
-                {items.map(c=><ConceptCard key={c.id} concept={c} onDelete={()=>{if(confirm("Remove?"))onDelete(c.id);}} onLightbox={onLightbox}/>)}
+                {items.map(c=><ConceptCard key={c.id} concept={c} onDelete={async()=>{if(await qConfirm("Remove this concept?"))onDelete(c.id);}} onLightbox={onLightbox}/>)}
               </div>
             </div>
           ))}
@@ -978,10 +993,28 @@ function FormActions({onCancel,onSubmit,submitLabel}){
   );
 }
 function ModalWrap({children,onClose}){
+  const ref=useRef(null);
+  // Only close when clicking directly on the backdrop — never intercept events on content
   return(
-    <div style={s.overlayBackdrop} onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div style={s.modal} onMouseDown={e=>e.stopPropagation()}>
+    <div ref={ref} style={s.overlayBackdrop} onClick={e=>{if(e.target===ref.current)onClose();}}>
+      <div style={s.modal}>
         {children}
+      </div>
+    </div>
+  );
+}
+
+// ── Styled confirm dialog ─────────────────────────────────────────────────────
+function ConfirmDialog({msg,onYes,onNo}){
+  useEffect(()=>{const h=e=>{if(e.key==="Enter")onYes();if(e.key==="Escape")onNo();};window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h);},[]);
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(4,6,14,.88)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1100}}>
+      <div style={{background:"#111627",border:"1px solid #1E2540",borderRadius:14,padding:"28px 32px",maxWidth:380,width:"90%",boxShadow:"0 16px 48px rgba(0,0,0,.6)"}}>
+        <p style={{fontFamily:"'Syne'",fontSize:15,fontWeight:600,color:"#E8EAF6",lineHeight:1.5,marginBottom:24}}>{msg}</p>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
+          <button className="q-btn-ghost" onClick={onNo} autoFocus>Cancel</button>
+          <button className="q-btn-danger" style={{borderColor:"#FF4466",color:"#FF7090"}} onClick={onYes}>Delete</button>
+        </div>
       </div>
     </div>
   );
@@ -994,7 +1027,8 @@ const css=`
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500;700&display=swap');
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
   ::-webkit-scrollbar{width:4px;height:4px;}::-webkit-scrollbar-track{background:#0A0E1A;}::-webkit-scrollbar-thumb{background:#1E2540;border-radius:2px;}
-  input,textarea,select{outline:none;}button{cursor:pointer;border:none;background:none;font-family:'Syne',sans-serif;}a{text-decoration:none;}
+  input,textarea,select{outline:none;-webkit-user-select:text!important;user-select:text!important;-webkit-touch-callout:default;}
+  button{cursor:pointer;border:none;background:none;font-family:'Syne',sans-serif;}a{text-decoration:none;}
   audio{accent-color:#00D4FF;}
 
   .q-tab-bar{display:flex;border-bottom:1px solid #1A2040;margin-bottom:22px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
