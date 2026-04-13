@@ -14,7 +14,7 @@ function useIsMobile() {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.3.1";
+const APP_VER    = "v0.3.2";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -987,7 +987,7 @@ function Lightbox({url,name,onClose}){
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:9000,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
       <div style={{display:"flex",gap:12,marginBottom:16}} onClick={e=>e.stopPropagation()}>
-        <button onClick={download} style={{padding:"8px 18px",background:"#00D4FF",color:"#06090F",border:"none",borderRadius:8,fontFamily:"'Syne'",fontWeight:700,fontSize:13,cursor:"pointer"}}>⬇ Download</button>
+        <button onClick={download} style={{padding:"8px 18px",background:"#00D4FF",color:"#06090F",border:"none",borderRadius:8,fontFamily:"'Syne'",fontWeight:700,fontSize:13,cursor:"pointer"}}>Download</button>
         <button onClick={onClose} style={{padding:"8px 14px",background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.15)",borderRadius:8,color:"#E8EAF6",fontFamily:"'Syne'",fontSize:13,cursor:"pointer"}}>✕ Close</button>
       </div>
       <img src={url} alt={name} onClick={e=>e.stopPropagation()} style={{maxWidth:"92vw",maxHeight:"80vh",objectFit:"contain",borderRadius:10,boxShadow:"0 16px 64px rgba(0,0,0,.8)"}}/>
@@ -1233,43 +1233,53 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
   };
   return(
     <div style={{...s.page,padding:isMobile?"14px":"36px 40px"}}>
-      <div style={{...s.projHead,marginBottom:isMobile?14:22}}>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
-            <h1 style={{...s.pageTitle,fontSize:isMobile?18:27}}>{project.name}</h1>
-            <span style={{...s.badge,color:cfg.color,background:cfg.bg,fontSize:11,padding:"3px 8px"}}>{cfg.label}</span>
-          </div>
-          {project.description&&<p style={s.pageSub}>{project.description}</p>}
-          {/* Tags */}
-          {projTags.length>0&&(
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
-              {projTags.map(t=><span key={t.id} style={{fontSize:11,padding:"3px 10px",borderRadius:12,background:`${t.color}18`,border:`1px solid ${t.color}40`,color:t.color,fontFamily:"'Syne'",fontWeight:600}}>{t.name}</span>)}
-            </div>
-          )}
-          {/* Project links */}
-          {(project.gitUrl||project.supabaseUrl||project.vercelUrl)&&(
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
-              {project.gitUrl&&<a href={project.gitUrl} target="_blank" rel="noreferrer" className="q-proj-link"><span>⎇</span> Git</a>}
-              {project.supabaseUrl&&<a href={project.supabaseUrl} target="_blank" rel="noreferrer" className="q-proj-link"><span>⚡</span> Supabase</a>}
-              {project.vercelUrl&&<a href={project.vercelUrl} target="_blank" rel="noreferrer" className="q-proj-link"><span>▲</span> Vercel</a>}
-            </div>
-          )}
+
+      {/* ── Project header ── */}
+      <div style={{marginBottom:isMobile?14:22}}>
+
+        {/* Title + badge row — always full width */}
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
+          <h1 style={{...s.pageTitle,fontSize:isMobile?20:27}}>{project.name}</h1>
+          <span style={{...s.badge,color:cfg.color,background:cfg.bg,fontSize:11,padding:"3px 8px"}}>{cfg.label}</span>
+          {project.isPublic&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:"rgba(74,222,128,.1)",color:"#4ADE80",fontFamily:"'JetBrains Mono'",fontWeight:700,letterSpacing:.5}}>PUBLIC</span>}
         </div>
-        <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
-          {/* Export / share dropdown on mobile, full buttons on desktop */}
+
+        {/* Description — always full width */}
+        {project.description&&<p style={{...s.pageSub,marginBottom:8}}>{project.description}</p>}
+
+        {/* Tags */}
+        {projTags.length>0&&(
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+            {projTags.map(t=><span key={t.id} style={{fontSize:11,padding:"3px 10px",borderRadius:12,background:`${t.color}18`,border:`1px solid ${t.color}40`,color:t.color,fontFamily:"'Syne'",fontWeight:600}}>{t.name}</span>)}
+          </div>
+        )}
+
+        {/* Project links — inline row, no icons */}
+        {(project.gitUrl||project.supabaseUrl||project.vercelUrl)&&(
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+            {project.gitUrl&&<a href={project.gitUrl} target="_blank" rel="noreferrer" className="q-proj-link">Git</a>}
+            {project.supabaseUrl&&<a href={project.supabaseUrl} target="_blank" rel="noreferrer" className="q-proj-link">Supabase</a>}
+            {project.vercelUrl&&<a href={project.vercelUrl} target="_blank" rel="noreferrer" className="q-proj-link">Vercel</a>}
+          </div>
+        )}
+
+        {/* Action buttons — their own full-width row, no emoji icons */}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          {/* Desktop-only extras */}
           {!isMobile&&<>
-            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportPDF} title="Export PDF">📄 PDF</button>
-            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportJSON} title="Export JSON">⬇ JSON</button>
-            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12,color:project.isPublic?"#4ADE80":undefined}} onClick={onTogglePublic} title={project.isPublic?"Make private":"Make public"}>{project.isPublic?"🌐 Public":"🔒 Private"}</button>
-            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onOpenSaveTemplate} title="Save as template">💾 Template</button>
+            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportPDF}>PDF</button>
+            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportJSON}>Export JSON</button>
+            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12,color:project.isPublic?"#4ADE80":undefined}} onClick={onTogglePublic}>{project.isPublic?"Public":"Private"}</button>
+            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onOpenSaveTemplate}>Save Template</button>
           </>}
+          {/* Copy Link — shown on all screen sizes when public */}
           {project.isPublic&&project.publicSlug&&(
-            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12,color:"#4ADE80"}} onClick={onCopyPublicLink} title="Copy public link">🔗 Copy Link</button>
+            <button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12,color:"#4ADE80"}} onClick={onCopyPublicLink}>Copy Link</button>
           )}
-          <button className="q-btn-ghost" style={{padding:isMobile?"6px 10px":"9px 14px",fontSize:isMobile?12:13}} onClick={onChangelog}>📋</button>
-          <button className="q-btn-ghost" style={{padding:isMobile?"6px 10px":"9px 14px",fontSize:isMobile?12:13}} onClick={onEdit}>Edit</button>
-          {project.status!=="archived"&&<button className="q-btn-ghost" style={{padding:isMobile?"6px 10px":"9px 14px",fontSize:isMobile?12:13,color:"#8B8FA8"}} onClick={onArchive} title="Archive + export">Archive</button>}
-          <button className="q-btn-danger" style={{padding:isMobile?"6px 10px":"9px 14px",fontSize:isMobile?12:13}} onClick={onDelete}>Delete</button>
+          <button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12}} onClick={onChangelog}>Changelog</button>
+          <button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12}} onClick={onEdit}>Edit</button>
+          {project.status!=="archived"&&<button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12,color:"#8B8FA8"}} onClick={onArchive}>Archive</button>}
+          <button className="q-btn-danger" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12}} onClick={onDelete}>Delete</button>
         </div>
       </div>
       <ScrollableTabBar isMobile={isMobile}>
@@ -1355,7 +1365,7 @@ function VersionsTab({project,onAdd,onDelete,onChangelog}){
       <div style={s.tabBar}>
         <span style={s.mono12}>{project.versions?.length||0} releases</span>
         <div style={{display:"flex",gap:8}}>
-          {project.versions?.length>0&&<button className="q-btn-ghost" style={{fontSize:12,padding:"7px 12px"}} onClick={onChangelog}>📋 Changelog</button>}
+          {project.versions?.length>0&&<button className="q-btn-ghost" style={{fontSize:12,padding:"7px 12px"}} onClick={onChangelog}>Changelog</button>}
           <button className="q-btn-primary" onClick={onAdd}>+ Log Version</button>
         </div>
       </div>
@@ -1458,7 +1468,7 @@ function AssetsTab({project,onAdd,onDelete,onUploadFile,onLightbox}){
       <div style={s.tabBar}>
         <span style={s.mono12}>{assets.length} {assets.length===1?"asset":"assets"}</span>
         <div style={{display:"flex",gap:8}}>
-          <button className="q-btn-ghost" style={{fontSize:12,padding:"7px 12px"}} onClick={()=>fileInput.current?.click()}>⬆ Upload File</button>
+          <button className="q-btn-ghost" style={{fontSize:12,padding:"7px 12px"}} onClick={()=>fileInput.current?.click()}>Upload File</button>
           <button className="q-btn-primary" onClick={onAdd}>+ Add Link</button>
         </div>
       </div>
@@ -1551,7 +1561,7 @@ function ConceptsTab({project,onAdd,onDelete,onUploadFile,onLightbox}){
       <div style={s.tabBar}>
         <span style={s.mono12}>{concepts.length} {concepts.length===1?"concept":"concepts"}</span>
         <div style={{display:"flex",gap:8}}>
-          <button className="q-btn-ghost" style={{fontSize:12,padding:"7px 12px"}} onClick={()=>fileInput.current?.click()}>⬆ Upload</button>
+          <button className="q-btn-ghost" style={{fontSize:12,padding:"7px 12px"}} onClick={()=>fileInput.current?.click()}>Upload</button>
           <button className="q-btn-primary" onClick={onAdd}>+ Add Concept</button>
         </div>
       </div>
@@ -1867,8 +1877,8 @@ function ConceptForm({data,setData,cfg,session,projectId,onSubmit,onUploadFile,o
   const stopRec=()=>{mrRef.current?.stop();setRecording(false);};
   const renderInput=()=>{switch(data.type){
     case "color":return<div style={{display:"flex",gap:10,alignItems:"center",marginTop:8}}><input type="color" value={data.content||"#00D4FF"} onChange={e=>set("content",e.target.value)} style={{width:48,height:40,padding:2,background:"#0D1120",border:"1px solid #1E2540",borderRadius:6,cursor:"pointer"}}/><input className="q-input" style={{flex:1,marginTop:0,fontFamily:"'JetBrains Mono'"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="#hex, rgb(), hsl()"/></div>;
-    case "image":return<div><input className="q-input" value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="https://image-url.com/..."/><button className="q-btn-ghost" style={{marginTop:8,width:"100%"}} onClick={()=>fileRef.current?.click()}>⬆ Upload image from device</button><input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFileChange}/></div>;
-    case "audio":return<div style={{marginTop:8}}>{recording?<button className="q-btn-danger" style={{width:"100%",padding:10}} onClick={stopRec}>⏹ Stop Recording</button>:<button className="q-btn-ghost" style={{width:"100%",padding:10}} onClick={startRec}>🎙 Start Recording</button>}<button className="q-btn-ghost" style={{marginTop:8,width:"100%"}} onClick={()=>fileRef.current?.click()}>⬆ Upload audio from device</button><input ref={fileRef} type="file" accept="audio/*" style={{display:"none"}} onChange={handleFileChange}/>{data.content&&<audio src={data.content} controls style={{width:"100%",marginTop:10}}/>}</div>;
+    case "image":return<div><input className="q-input" value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="https://image-url.com/..."/><button className="q-btn-ghost" style={{marginTop:8,width:"100%"}} onClick={()=>fileRef.current?.click()}>Upload Image</button><input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFileChange}/></div>;
+    case "audio":return<div style={{marginTop:8}}>{recording?<button className="q-btn-danger" style={{width:"100%",padding:10}} onClick={stopRec}>Stop Recording</button>:<button className="q-btn-ghost" style={{width:"100%",padding:10}} onClick={startRec}>Start Recording</button>}<button className="q-btn-ghost" style={{marginTop:8,width:"100%"}} onClick={()=>fileRef.current?.click()}>Upload Audio</button><input ref={fileRef} type="file" accept="audio/*" style={{display:"none"}} onChange={handleFileChange}/>{data.content&&<audio src={data.content} controls style={{width:"100%",marginTop:10}}/>}</div>;
     case "code": return<textarea className="q-input q-mono" style={{height:130,resize:"vertical"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="// paste code here"/>;
     case "link": return<input className="q-input" value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="https://..."/>;
     default:     return<textarea className="q-input" style={{height:100,resize:"vertical"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Enter text…"/>;
@@ -2074,7 +2084,7 @@ function ManageTemplatesModal({templates,onDelete,onApply,onCancel}){
     <div>
       <h2 style={s.modalTitle}>Project Templates</h2>
       {(!templates||templates.length===0)?(
-        <div style={s.empty}><p>No templates yet.</p><p style={{fontSize:13,color:"#4B5268",marginTop:4}}>Save a project as a template using the 💾 Template button.</p></div>
+        <div style={s.empty}><p>No templates yet.</p><p style={{fontSize:13,color:"#4B5268",marginTop:4}}>Save a project as a template using the Save Template button.</p></div>
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
           {templates.map(t=>(
@@ -2109,7 +2119,7 @@ function ChangelogModal({project,onClose}){
   return(
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-        <h2 style={s.modalTitle}>📋 Changelog</h2>
+        <h2 style={s.modalTitle}>Changelog</h2>
         <div style={{display:"flex",gap:8}}>
           <button className="q-btn-ghost" style={{padding:"7px 14px",fontSize:12}} onClick={copy}>{copied?"✓ Copied!":"Copy Markdown"}</button>
           <button className="q-btn-ghost" style={{padding:"7px 12px",fontSize:12}} onClick={onClose}>✕</button>
