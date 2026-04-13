@@ -14,7 +14,7 @@ function useIsMobile() {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.1.0";
+const APP_VER    = "v0.3.0";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -34,6 +34,33 @@ const ASSET_TYPES=["Link","Icon","Splash Screen","Screenshot","Document","APK / 
 const ASSET_ICONS={Link:"🔗",Icon:"🖼","Splash Screen":"📱",Screenshot:"🖥",Document:"📄","APK / Build":"📦",Other:"📎"};
 const CONCEPT_TYPES=["text","color","image","code","audio","link"];
 const CONCEPT_ICONS={text:"📝",color:"🎨",image:"🖼",code:"💻",audio:"🎙",link:"🔗"};
+
+const PRIORITY_CONFIG = {
+  critical: { label:"Critical", color:"#FF4466", bg:"rgba(255,68,102,0.12)",  icon:"🔴" },
+  high:     { label:"High",     color:"#FFB347", bg:"rgba(255,179,71,0.12)",  icon:"🟠" },
+  medium:   { label:"Medium",   color:"#00D4FF", bg:"rgba(0,212,255,0.10)",   icon:"🔵" },
+  low:      { label:"Low",      color:"#8B8FA8", bg:"rgba(139,143,168,0.10)", icon:"⚪" },
+};
+const PRIORITY_KEYS = ["critical","high","medium","low"];
+
+const DEP_TYPES    = ["npm","pip","gradle","cocoapods","cargo","gem","other"];
+const DEP_STATUSES = {
+  ok:         { label:"Up to date",  color:"#4ADE80", icon:"✓" },
+  outdated:   { label:"Outdated",    color:"#FFB347", icon:"↑" },
+  deprecated: { label:"Deprecated",  color:"#FF6B9D", icon:"⚠" },
+  conflict:   { label:"Conflict",    color:"#FF4466", icon:"✕" },
+};
+
+const BUILD_PLATFORMS = ["android","ios","windows","web","macos","linux"];
+const BUILD_STATUSES  = {
+  building:  { label:"Building",   color:"#8B8FA8", icon:"⟳" },
+  signed:    { label:"Signed",     color:"#00D4FF", icon:"✍" },
+  submitted: { label:"Submitted",  color:"#FFB347", icon:"↑" },
+  rejected:  { label:"Rejected",   color:"#FF4466", icon:"✕" },
+  live:      { label:"Live",       color:"#4ADE80", icon:"✓" },
+};
+
+const ENV_PRESET_COLORS = ["#4ADE80","#00D4FF","#FFB347","#FF6B9D","#B47FFF","#8B8FA8"];
 const FEED_META={
   version:     {icon:"⟳",label:"Version",      color:"#00D4FF"},
   milestone:   {icon:"◎",label:"Milestone Done",color:"#4ADE80"},
@@ -50,15 +77,19 @@ const TIME_PERIODS=[
   {key:"all",label:"All",ms:null},
 ];
 const DEFAULT_TABS=[
-  {key:"overview",  label:"Overview"  },
-  {key:"versions",  label:"Versions"  },
-  {key:"milestones",label:"Milestones"},
-  {key:"todos",     label:"To-Do"     },
-  {key:"notes",     label:"Notes"     },
-  {key:"assets",    label:"Assets"    },
-  {key:"issues",    label:"Issues"    },
-  {key:"ideas",     label:"Ideas"     },
-  {key:"concepts",  label:"Concepts"  },
+  {key:"overview",     label:"Overview"     },
+  {key:"versions",     label:"Versions"     },
+  {key:"milestones",   label:"Milestones"   },
+  {key:"todos",        label:"To-Do"        },
+  {key:"notes",        label:"Notes"        },
+  {key:"assets",       label:"Assets"       },
+  {key:"issues",       label:"Issues"       },
+  {key:"build-log",    label:"Build Log"    },
+  {key:"environments", label:"Environments" },
+  {key:"dependencies", label:"Dependencies" },
+  {key:"ideas",        label:"Ideas"        },
+  {key:"concepts",     label:"Concepts"     },
+  {key:"github",       label:"GitHub"       },
 ];
 
 // ── Styled confirm dialog (replaces native confirm()) ─────────────────────────
@@ -100,33 +131,180 @@ async function loadProjects(url,key,token,userId){
   const rows=await sb.get(url,key,token,"projects",`?user_id=eq.${userId}&order=position.asc`);
   if(!rows.length)return[];
   const ids=rows.map(p=>p.id).join(",");
-  const [vers,miles,notes,todos,assets,issues,ideas,concepts]=await Promise.all([
-    sb.get(url,key,token,"versions",  `?project_id=in.(${ids})&order=date.desc`),
-    sb.get(url,key,token,"milestones",`?project_id=in.(${ids})&order=created_at.asc`),
-    sb.get(url,key,token,"notes",     `?project_id=in.(${ids})&order=position.asc`),
-    sb.get(url,key,token,"todos",     `?project_id=in.(${ids})&order=position.asc`),
-    sb.get(url,key,token,"assets",    `?project_id=in.(${ids})&order=created_at.asc`),
-    sb.get(url,key,token,"issues",    `?project_id=in.(${ids})&order=created_at.desc`),
-    sb.get(url,key,token,"ideas",     `?project_id=in.(${ids})&order=position.asc`),
-    sb.get(url,key,token,"concepts",  `?project_id=in.(${ids})&order=created_at.desc`),
+  const [vers,miles,notes,todos,assets,issues,ideas,concepts,builds,envs,deps,ptRows]=await Promise.all([
+    sb.get(url,key,token,"versions",      `?project_id=in.(${ids})&order=date.desc`),
+    sb.get(url,key,token,"milestones",    `?project_id=in.(${ids})&order=created_at.asc`),
+    sb.get(url,key,token,"notes",         `?project_id=in.(${ids})&order=position.asc`),
+    sb.get(url,key,token,"todos",         `?project_id=in.(${ids})&order=position.asc`),
+    sb.get(url,key,token,"assets",        `?project_id=in.(${ids})&order=created_at.asc`),
+    sb.get(url,key,token,"issues",        `?project_id=in.(${ids})&order=created_at.desc`),
+    sb.get(url,key,token,"ideas",         `?project_id=in.(${ids})&order=position.asc`),
+    sb.get(url,key,token,"concepts",      `?project_id=in.(${ids})&order=created_at.desc`),
+    sb.get(url,key,token,"build_logs",    `?project_id=in.(${ids})&order=built_at.desc`),
+    sb.get(url,key,token,"environments",  `?project_id=in.(${ids})&order=position.asc`),
+    sb.get(url,key,token,"dependencies",  `?project_id=in.(${ids})&order=created_at.asc`),
+    sb.get(url,key,token,"project_tags",  `?project_id=in.(${ids})`),
   ]);
   return rows.map(p=>({
     id:p.id,name:p.name,description:p.description,status:p.status,
     techStack:p.tech_stack||[],localFolder:p.local_folder||null,
     gitUrl:p.git_url||"",supabaseUrl:p.supabase_url||"",vercelUrl:p.vercel_url||"",
+    isPublic:p.is_public||false,publicSlug:p.public_slug||null,
     position:p.position,createdAt:p.created_at,
-    versions:   vers.filter(v=>v.project_id===p.id).map(v=>({id:v.id,version:v.version,releaseNotes:v.release_notes,date:v.date,fileLinks:v.file_links||[]})),
-    milestones: miles.filter(m=>m.project_id===p.id).map(m=>({id:m.id,title:m.title,description:m.description,date:m.date,completed:m.completed,completedAt:m.completed_at,createdAt:m.created_at})),
-    notes:      notes.filter(n=>n.project_id===p.id).map(n=>({id:n.id,content:n.content,position:n.position,createdAt:n.created_at})),
-    todos:      todos.filter(t=>t.project_id===p.id).map(t=>({id:t.id,text:t.text,completed:t.completed,completedAt:t.completed_at,position:t.position,createdAt:t.created_at})),
-    assets:     assets.filter(a=>a.project_id===p.id).map(a=>({id:a.id,name:a.name,url:a.url,type:a.type,createdAt:a.created_at})),
-    issues:     issues.filter(i=>i.project_id===p.id).map(i=>({id:i.id,title:i.title,description:i.description,status:i.status,fixDescription:i.fix_description,fixedAt:i.fixed_at,createdAt:i.created_at})),
-    ideas:      ideas.filter(d=>d.project_id===p.id).map(d=>({id:d.id,content:d.content,pinned:d.pinned,position:d.position,createdAt:d.created_at})),
-    concepts:   concepts.filter(c=>c.project_id===p.id).map(c=>({id:c.id,type:c.type,label:c.label,content:c.content,createdAt:c.created_at})),
+    tagIds:      ptRows.filter(pt=>pt.project_id===p.id).map(pt=>pt.tag_id),
+    versions:    vers.filter(v=>v.project_id===p.id).map(v=>({id:v.id,version:v.version,releaseNotes:v.release_notes,date:v.date,fileLinks:v.file_links||[]})),
+    milestones:  miles.filter(m=>m.project_id===p.id).map(m=>({id:m.id,title:m.title,description:m.description,date:m.date,completed:m.completed,completedAt:m.completed_at,createdAt:m.created_at})),
+    notes:       notes.filter(n=>n.project_id===p.id).map(n=>({id:n.id,content:n.content,position:n.position,createdAt:n.created_at})),
+    todos:       todos.filter(t=>t.project_id===p.id).map(t=>({id:t.id,text:t.text,completed:t.completed,completedAt:t.completed_at,priority:t.priority||"medium",position:t.position,createdAt:t.created_at})),
+    assets:      assets.filter(a=>a.project_id===p.id).map(a=>({id:a.id,name:a.name,url:a.url,type:a.type,createdAt:a.created_at})),
+    issues:      issues.filter(i=>i.project_id===p.id).map(i=>({id:i.id,title:i.title,description:i.description,status:i.status,priority:i.priority||"medium",fixDescription:i.fix_description,fixedAt:i.fixed_at,createdAt:i.created_at})),
+    ideas:       ideas.filter(d=>d.project_id===p.id).map(d=>({id:d.id,content:d.content,pinned:d.pinned,position:d.position,createdAt:d.created_at})),
+    concepts:    concepts.filter(c=>c.project_id===p.id).map(c=>({id:c.id,type:c.type,label:c.label,content:c.content,createdAt:c.created_at})),
+    buildLogs:   builds.filter(b=>b.project_id===p.id).map(b=>({id:b.id,versionId:b.version_id,platform:b.platform,buildNumber:b.build_number,buildSize:b.build_size,status:b.status,store:b.store,notes:b.notes,builtAt:b.built_at,createdAt:b.created_at})),
+    environments:envs.filter(e=>e.project_id===p.id).map(e=>({id:e.id,name:e.name,url:e.url,color:e.color,variables:e.variables||[],notes:e.notes,position:e.position,createdAt:e.created_at})),
+    dependencies:deps.filter(d=>d.project_id===p.id).map(d=>({id:d.id,name:d.name,currentVersion:d.current_version,latestVersion:d.latest_version,type:d.type,status:d.status,notes:d.notes,createdAt:d.created_at})),
   }));
 }
 
-// ── Root App ──────────────────────────────────────────────────────────────────
+async function loadUserTags(url,key,token,userId){
+  try{ return await sb.get(url,key,token,"tags",`?user_id=eq.${userId}&order=name.asc`); }catch{ return []; }
+}
+
+// ── Activity feed builder (cross-project) ─────────────────────────────────────
+function buildActivityFeed(projects){
+  const items=[];
+  projects.forEach(p=>{
+    p.versions?.forEach(v=>items.push({type:"version",projectId:p.id,projectName:p.name,date:new Date(v.date),title:v.version,content:v.releaseNotes}));
+    p.milestones?.filter(m=>m.completed).forEach(m=>items.push({type:"milestone",projectId:p.id,projectName:p.name,date:new Date(m.completedAt||m.date||m.createdAt),title:m.title,content:null}));
+    p.todos?.filter(t=>t.completed&&t.completedAt).forEach(t=>items.push({type:"todo",projectId:p.id,projectName:p.name,date:new Date(t.completedAt),title:t.text,content:null}));
+    p.notes?.forEach(n=>items.push({type:"note",projectId:p.id,projectName:p.name,date:new Date(n.createdAt),title:null,content:n.content}));
+    p.issues?.filter(i=>i.status==="fixed").forEach(i=>items.push({type:"issue-fixed",projectId:p.id,projectName:p.name,date:new Date(i.fixedAt||i.createdAt),title:i.title,content:i.fixDescription}));
+  });
+  return items.sort((a,b)=>b.date-a.date);
+}
+
+// ── Cross-project content search ──────────────────────────────────────────────
+function searchAllContent(projects,query){
+  if(!query.trim())return[];
+  const q=query.toLowerCase();
+  const results=[];
+  projects.forEach(p=>{
+    p.notes?.forEach(n=>{if(n.content?.toLowerCase().includes(q))results.push({projectId:p.id,projectName:p.name,type:"note",label:"Note",excerpt:n.content,createdAt:n.createdAt});});
+    p.todos?.forEach(t=>{if(t.text?.toLowerCase().includes(q))results.push({projectId:p.id,projectName:p.name,type:"todo",label:t.completed?"Done Task":"To-Do",excerpt:t.text,createdAt:t.createdAt});});
+    p.issues?.forEach(i=>{if(i.title?.toLowerCase().includes(q)||i.description?.toLowerCase().includes(q))results.push({projectId:p.id,projectName:p.name,type:"issue",label:"Issue",excerpt:i.title,createdAt:i.createdAt});});
+    p.versions?.forEach(v=>{if(v.version?.toLowerCase().includes(q)||v.releaseNotes?.toLowerCase().includes(q))results.push({projectId:p.id,projectName:p.name,type:"version",label:"Version",excerpt:v.version+(v.releaseNotes?` — ${v.releaseNotes}`:""),createdAt:v.date});});
+    p.ideas?.forEach(d=>{if(d.content?.toLowerCase().includes(q))results.push({projectId:p.id,projectName:p.name,type:"idea",label:"Idea",excerpt:d.content,createdAt:d.createdAt});});
+    p.dependencies?.forEach(d=>{if(d.name?.toLowerCase().includes(q))results.push({projectId:p.id,projectName:p.name,type:"dep",label:"Dependency",excerpt:d.name,createdAt:d.createdAt});});
+  });
+  return results.slice(0,40);
+}
+
+// ── Changelog generator ───────────────────────────────────────────────────────
+function generateChangelog(project){
+  if(!project.versions?.length)return"# No versions logged yet.";
+  const sorted=[...project.versions].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const fixedIssues=[...(project.issues||[])].filter(i=>i.status==="fixed"&&i.fixedAt);
+  let md=`# Changelog — ${project.name}\n\n`;
+  sorted.forEach(v=>{
+    const vDate=new Date(v.date);
+    const dateStr=vDate.toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"});
+    md+=`## ${v.version} — ${dateStr}\n`;
+    if(v.releaseNotes)md+=`\n${v.releaseNotes}\n`;
+    // Find issues fixed within 30 days before this version date
+    const related=fixedIssues.filter(i=>{
+      const fd=new Date(i.fixedAt); const diff=(vDate-fd)/(1000*60*60*24);
+      return diff>=0&&diff<=30;
+    });
+    if(related.length){
+      md+=`\n### Issues Fixed\n`;
+      related.forEach(i=>{
+        const pc=PRIORITY_CONFIG[i.priority||"medium"];
+        md+=`- [${pc.label.toUpperCase()}] ${i.title}`;
+        if(i.fixDescription)md+=`\n  > ${i.fixDescription}`;
+        md+="\n";
+      });
+    }
+    md+="\n---\n\n";
+  });
+  return md.trim();
+}
+
+// ── GitHub helpers ────────────────────────────────────────────────────────────
+function parseGitHubRepo(gitUrl){
+  if(!gitUrl)return null;
+  const m=gitUrl.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/|$)/i);
+  return m?{owner:m[1],repo:m[2]}:null;
+}
+
+async function fetchGitHubAPI(owner,repo,token){
+  const h=token?{Authorization:`token ${token}`}:{};
+  try{
+    const [commits,issues,prs]=await Promise.all([
+      fetch(`https://api.github.com/repos/${owner}/${repo}/commits?per_page=15`,{headers:h}).then(r=>r.ok?r.json():[]).catch(()=>[]),
+      fetch(`https://api.github.com/repos/${owner}/${repo}/issues?state=open&per_page=15&labels=`,{headers:h}).then(r=>r.ok?r.json():[]).catch(()=>[]),
+      fetch(`https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=10`,{headers:h}).then(r=>r.ok?r.json():[]).catch(()=>[]),
+    ]);
+    return{
+      commits:(Array.isArray(commits)?commits:[]).filter(c=>c.sha).map(c=>({sha:c.sha?.slice(0,7),message:c.commit?.message?.split("\n")[0]||"",author:c.commit?.author?.name||"",date:c.commit?.author?.date,url:c.html_url})),
+      issues:(Array.isArray(issues)?issues:[]).filter(i=>!i.pull_request).map(i=>({id:i.number,title:i.title,state:i.state,labels:(i.labels||[]).map(l=>l.name),url:i.html_url,date:i.created_at})),
+      prs:(Array.isArray(prs)?prs:[]).map(p=>({id:p.number,title:p.title,draft:p.draft,url:p.html_url,date:p.created_at,base:p.base?.ref})),
+      fetchedAt:new Date().toISOString(),owner,repo,
+    };
+  }catch(e){return{error:e.message,commits:[],issues:[],prs:[],fetchedAt:new Date().toISOString(),owner,repo};}
+}
+
+// ── Slug & export helpers ─────────────────────────────────────────────────────
+function generateSlug(name){
+  return name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40)+"-"+Math.random().toString(36).slice(2,6);
+}
+
+function exportProjectJSON(project){
+  const data=JSON.stringify({exportedAt:new Date().toISOString(),version:"qoder-v0.3",project},null,2);
+  const blob=new Blob([data],{type:"application/json"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");a.href=url;a.download=`${project.name.replace(/\s+/g,"-")}-export.json`;a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),5000);
+}
+
+function exportProjectPDF(project){
+  const scfg={"planning":"Planning","in-dev":"In Development","beta":"Beta","released":"Released","archived":"Archived"};
+  const msTotal=project.milestones?.length||0,msDone=project.milestones?.filter(m=>m.completed).length||0;
+  const openIssues=(project.issues||[]).filter(i=>i.status==="open");
+  const openTodos=(project.todos||[]).filter(t=>!t.completed);
+  const priorityBadge=p=>p==="critical"?"crit":p==="high"?"high":"ok";
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${project.name} — Qoder Report</title>
+<style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Segoe UI',system-ui,sans-serif;color:#1a1a2e;padding:40px;max-width:900px;margin:0 auto;font-size:14px;line-height:1.6;}h1{font-size:28px;font-weight:800;letter-spacing:-1px;margin-bottom:6px;}h2{font-size:16px;font-weight:700;margin:28px 0 10px;padding-bottom:6px;border-bottom:2px solid #e8eaf6;}
+.meta{color:#6b7290;font-size:13px;margin-bottom:16px;}.status{display:inline-block;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;font-family:monospace;background:#e8f8ff;color:#0098b8;margin-bottom:14px;}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0;}.stat{background:#f8f9ff;border:1px solid #e8eaf6;border-radius:8px;padding:14px;text-align:center;}.stat-val{font-size:24px;font-weight:800;color:#00a8c8;font-family:monospace;}.stat-lbl{font-size:11px;color:#8b8fa8;margin-top:4px;text-transform:uppercase;letter-spacing:.5px;}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-family:monospace;background:#f0f0ff;color:#4b5268;margin:2px;}.item{padding:9px 0;border-bottom:1px solid #f0f0f8;}.item:last-child{border-bottom:none;}.item-title{font-weight:600;}.item-meta{font-size:12px;color:#8b8fa8;margin-top:2px;}
+.badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;margin-right:6px;}.badge-ok{background:#e8fff0;color:#16a34a;}.badge-high{background:#fff3e0;color:#ea580c;}.badge-crit{background:#fee2e2;color:#dc2626;}
+.done{text-decoration:line-through;color:#9ca3af;}.progress{height:7px;background:#e8eaf6;border-radius:4px;margin:6px 0;}.progress-fill{height:7px;background:linear-gradient(90deg,#00c8ff,#00e896);border-radius:4px;}
+.note{background:#f8f9ff;border-left:3px solid #00c8ff;padding:10px 14px;border-radius:0 6px 6px 0;font-size:13px;white-space:pre-wrap;margin-bottom:10px;}
+footer{margin-top:40px;padding-top:14px;border-top:1px solid #e8eaf6;font-size:11px;color:#9ca3af;text-align:center;}
+@media print{body{padding:20px;}h2{break-after:avoid;}@page{margin:.8in;}}</style></head><body>
+<h1>${project.name}</h1><div class="status">${scfg[project.status]||project.status}</div>
+<div class="meta">${project.description||""}</div>
+${project.techStack?.length?`<div style="margin-bottom:14px">${project.techStack.map(t=>`<span class="tag">${t}</span>`).join("")}</div>`:""}
+<div class="stats">
+  <div class="stat"><div class="stat-val">${project.versions?.length||0}</div><div class="stat-lbl">Releases</div></div>
+  <div class="stat"><div class="stat-val">${msDone}/${msTotal}</div><div class="stat-lbl">Milestones</div></div>
+  <div class="stat"><div class="stat-val">${openIssues.length}</div><div class="stat-lbl">Open Issues</div></div>
+  <div class="stat"><div class="stat-val">${openTodos.length}</div><div class="stat-lbl">Open Tasks</div></div>
+</div>
+${msTotal>0?`<div class="progress"><div class="progress-fill" style="width:${Math.round(msDone/msTotal*100)}%"></div></div><div style="font-size:12px;color:#8b8fa8;margin-bottom:18px">${msDone}/${msTotal} milestones complete (${Math.round(msDone/msTotal*100)}%)</div>`:""}
+${project.versions?.length?`<h2>Version History</h2>${project.versions.slice(0,10).map(v=>`<div class="item"><div class="item-title">${v.version}</div><div class="item-meta">${new Date(v.date).toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"})}${v.releaseNotes?` — ${v.releaseNotes.slice(0,100)}`:""}</div></div>`).join("")}`:""}
+${openIssues.length?`<h2>Open Issues (${openIssues.length})</h2>${openIssues.map(i=>`<div class="item"><span class="badge badge-${priorityBadge(i.priority)}">${(i.priority||"medium").toUpperCase()}</span><span class="item-title">${i.title}</span>${i.description?`<div class="item-meta">${i.description.slice(0,100)}</div>`:""}</div>`).join("")}`:""}
+${openTodos.length?`<h2>Open Tasks (${openTodos.length})</h2>${openTodos.map(t=>`<div class="item"><span class="badge badge-${priorityBadge(t.priority)}">${(t.priority||"medium").toUpperCase()}</span>${t.text}</div>`).join("")}`:""}
+${project.milestones?.length?`<h2>Milestones</h2>${project.milestones.map(m=>`<div class="item"><span class="${m.completed?"done":""}">${m.completed?"☑":"☐"} <strong>${m.title}</strong>${m.date?` — ${new Date(m.date).toLocaleDateString()}`:""}</span></div>`).join("")}`:""}
+${project.notes?.length?`<h2>Notes (${project.notes.length})</h2>${project.notes.slice(0,5).map(n=>`<div class="note">${n.content.slice(0,300)}${n.content.length>300?"…":""}</div>`).join("")}`:""}
+<footer>Generated by Qoder ${APP_VER} · ${new Date().toLocaleString()} · ${project.name}</footer>
+</body></html>`;
+  const win=window.open("","_blank","width=900,height=700");
+  if(!win){alert("Please allow pop-ups to export PDF");return;}
+  win.document.write(html);win.document.close();
+  setTimeout(()=>win.print(),500);
+}
+
 export default function QoderApp() {
   const [screen,      setScreen]      = useState("loading");
   const [cfg,         setCfg]         = useState(null);
@@ -143,8 +321,12 @@ export default function QoderApp() {
   const [filter,      setFilter]      = useState("all");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [tabOrder,    setTabOrder]    = useState(DEFAULT_TABS);
+  const [tagFilter,   setTagFilter]   = useState(null); // tag id or null
   const [lightbox,    setLightbox]    = useState(null); // {url, name}
   const [confirmState,setConfirmState]= useState(null); // {msg, resolve}
+  const [userTags,    setUserTags]    = useState([]);
+  const [templates,   setTemplates]   = useState([]);
+  const [ghCache,     setGhCache]     = useState({}); // keyed by projectId
   const isMobile = useIsMobile();
   const projRef  = useRef(projects);
   projRef.current = projects;
@@ -173,6 +355,12 @@ export default function QoderApp() {
             await persistCfg({url:saved.url,key:saved.key},sess);
             const pjs=await loadProjects(saved.url,saved.key,res.access_token,res.user.id);
             setProjects(pjs);
+            const tags=await loadUserTags(saved.url,saved.key,res.access_token,res.user.id);
+            setUserTags(tags);
+            try{
+              const trows=await sb.get(saved.url,saved.key,res.access_token,"project_templates",`?user_id=eq.${res.user.id}&order=created_at.desc`);
+              setTemplates(trows.map(r=>({id:r.id,name:r.name,description:r.description,templateData:r.template_data,createdAt:r.created_at})));
+            }catch{}
             // Load synced tab order
             try{
               const sett=await sb.get(saved.url,saved.key,res.access_token,"user_settings",`?user_id=eq.${res.user.id}`);
@@ -211,6 +399,8 @@ export default function QoderApp() {
       try{
         const pjs=await loadProjects(cfg.url,cfg.key,session.access_token,session.user.id);
         setProjects(pjs);
+        const tags=await loadUserTags(cfg.url,cfg.key,session.access_token,session.user.id);
+        setUserTags(tags);
       }catch{}
     };
     const onFocus=()=>refresh();
@@ -291,6 +481,8 @@ export default function QoderApp() {
         setSession(sess);await persistCfg(cfg,sess);
         const pjs=await loadProjects(cfg.url,cfg.key,res.access_token,res.user.id);
         setProjects(pjs);
+        const tags=await loadUserTags(cfg.url,cfg.key,res.access_token,res.user.id);
+        setUserTags(tags);
         try{const sett=await sb.get(cfg.url,cfg.key,res.access_token,"user_settings",`?user_id=eq.${res.user.id}`);if(sett?.[0]?.tab_order){setTabOrder(mergeTabOrder(sett[0].tab_order));}}catch{}
         setScreen("app");
       }else if(isSignUp&&res.id){showToast("Check your email to confirm your account.","info");}
@@ -310,13 +502,27 @@ export default function QoderApp() {
   };
 
   // ── Project CRUD ─────────────────────────────────────────────────────────────
-  const addProject=async(p)=>{
+  const addProjectAndReturn=async(p)=>{
     const position=projects.length;
     try{
-      const row=await sb.post(cfg.url,cfg.key,T(),"projects",{user_id:session.user.id,name:p.name,description:p.description||null,status:p.status||"planning",tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,position});
-      const proj={id:row.id,name:row.name,description:row.description,status:row.status,techStack:row.tech_stack||[],localFolder:row.local_folder||null,gitUrl:row.git_url||"",supabaseUrl:row.supabase_url||"",vercelUrl:row.vercel_url||"",position:row.position,createdAt:row.created_at,versions:[],milestones:[],notes:[],todos:[],assets:[],issues:[],ideas:[],concepts:[]};
-      setProjects(ps=>[...ps,proj]);showToast("Project created");
-    }catch(e){showToast(e.message,"err");}
+      const row=await sb.post(cfg.url,cfg.key,T(),"projects",{user_id:session.user.id,name:p.name,description:p.description||null,status:p.status||"planning",tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,position,is_public:false});
+      const proj={id:row.id,name:row.name,description:row.description,status:row.status,techStack:row.tech_stack||[],localFolder:row.local_folder||null,gitUrl:row.git_url||"",supabaseUrl:row.supabase_url||"",vercelUrl:row.vercel_url||"",isPublic:false,publicSlug:null,position:row.position,createdAt:row.created_at,versions:[],milestones:[],notes:[],todos:[],assets:[],issues:[],ideas:[],concepts:[],buildLogs:[],environments:[],dependencies:[],tagIds:[]};
+      setProjects(ps=>[...ps,proj]);
+      showToast("Project created");
+      // If created from template, apply template data
+      if(p._templateId){
+        const tpl=templates.find(t=>t.id===p._templateId);
+        if(tpl){
+          const td=tpl.templateData||{};
+          await Promise.all([
+            ...(td.milestones||[]).map(m=>addMilestone(proj.id,m)),
+            ...(td.todos||[]).map(t=>addTodo(proj.id,t.text,t.priority||"medium")),
+            ...(td.environments||[]).map(e=>addEnvironment(proj.id,e)),
+          ]);
+        }
+      }
+      return proj;
+    }catch(e){showToast(e.message,"err");return null;}
   };
   const updateProject=async(id,p)=>{
     try{await sb.patch(cfg.url,cfg.key,T(),"projects",id,{name:p.name,description:p.description||null,status:p.status,tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null});mutate(id,x=>({...x,...p}));showToast("Project updated");}
@@ -325,6 +531,17 @@ export default function QoderApp() {
   const deleteProject=async(id)=>{
     try{await sb.del(cfg.url,cfg.key,T(),"projects",id);setProjects(ps=>ps.filter(p=>p.id!==id));setView("dashboard");setSelProj(null);showToast("Project deleted");}
     catch(e){showToast(e.message,"err");}
+  };
+  const archiveProject=async(pid)=>{
+    // Export snapshot first, then set status to archived
+    const proj=projects.find(p=>p.id===pid);
+    if(!proj)return;
+    exportProjectJSON(proj); // triggers download
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"projects",pid,{status:"archived"});
+      mutate(pid,p=>({...p,status:"archived"}));
+      showToast("Project archived — export downloaded");
+    }catch(e){showToast(e.message,"err");}
   };
 
   // ── Versions ─────────────────────────────────────────────────────────────────
@@ -343,7 +560,7 @@ export default function QoderApp() {
   const reorderNotes=async(pid,reordered)=>{mutate(pid,p=>({...p,notes:reordered}));try{await Promise.all(reordered.map((n,i)=>sb.patch(cfg.url,cfg.key,T(),"notes",n.id,{position:i})));}catch{}};
 
   // ── Todos ─────────────────────────────────────────────────────────────────────
-  const addTodo=async(pid,text)=>{const position=projects.find(p=>p.id===pid)?.todos?.length||0;try{const row=await sb.post(cfg.url,cfg.key,T(),"todos",{project_id:pid,text,completed:false,position});mutate(pid,p=>({...p,todos:[...p.todos,{id:row.id,text:row.text,completed:false,completedAt:null,position:row.position,createdAt:row.created_at}]}));}catch(e){showToast(e.message,"err");}};
+  const addTodo=async(pid,text,priority="medium")=>{const position=projects.find(p=>p.id===pid)?.todos?.length||0;try{const row=await sb.post(cfg.url,cfg.key,T(),"todos",{project_id:pid,text,completed:false,priority,position});mutate(pid,p=>({...p,todos:[...p.todos,{id:row.id,text:row.text,completed:false,completedAt:null,priority:row.priority||"medium",position:row.position,createdAt:row.created_at}]}));}catch(e){showToast(e.message,"err");}};
   const toggleTodo=async(pid,tid)=>{const todo=projects.find(p=>p.id===pid)?.todos.find(t=>t.id===tid);if(!todo)return;const completed=!todo.completed;const completedAt=completed?new Date().toISOString():null;try{await sb.patch(cfg.url,cfg.key,T(),"todos",tid,{completed,completed_at:completedAt});mutate(pid,p=>({...p,todos:p.todos.map(t=>t.id===tid?{...t,completed,completedAt}:t)}));}catch(e){showToast(e.message,"err");}};
   const deleteTodo=async(pid,tid)=>{try{await sb.del(cfg.url,cfg.key,T(),"todos",tid);mutate(pid,p=>({...p,todos:p.todos.filter(t=>t.id!==tid)}));}catch(e){showToast(e.message,"err");}};
   const reorderTodos=async(pid,reordered)=>{mutate(pid,p=>({...p,todos:reordered}));try{await Promise.all(reordered.map((t,i)=>sb.patch(cfg.url,cfg.key,T(),"todos",t.id,{position:i})));}catch{}};
@@ -354,7 +571,7 @@ export default function QoderApp() {
   const uploadAssetFile=async(pid,file,name,type)=>{try{showToast("Uploading…","info");const url=await sb.uploadFile(cfg.url,cfg.key,T(),session.user.id,pid,file);await addAsset(pid,{name:name||file.name,url,type:type||"Screenshot"});}catch(e){showToast(e.message,"err");}};
 
   // ── Issues ────────────────────────────────────────────────────────────────────
-  const addIssue=async(pid,iss)=>{try{const row=await sb.post(cfg.url,cfg.key,T(),"issues",{project_id:pid,title:iss.title,description:iss.description||null,status:"open"});mutate(pid,p=>({...p,issues:[{id:row.id,title:row.title,description:row.description,status:"open",fixDescription:null,fixedAt:null,createdAt:row.created_at},...p.issues]}));showToast("Issue logged");}catch(e){showToast(e.message,"err");}};
+  const addIssue=async(pid,iss)=>{try{const row=await sb.post(cfg.url,cfg.key,T(),"issues",{project_id:pid,title:iss.title,description:iss.description||null,status:"open",priority:iss.priority||"medium"});mutate(pid,p=>({...p,issues:[{id:row.id,title:row.title,description:row.description,status:"open",priority:row.priority||"medium",fixDescription:null,fixedAt:null,createdAt:row.created_at},...p.issues]}));showToast("Issue logged");}catch(e){showToast(e.message,"err");}};
   const fixIssue=async(pid,iid,fixDescription)=>{
     const fixedAt=new Date().toISOString();
     try{
@@ -376,12 +593,147 @@ export default function QoderApp() {
   const deleteIdea=async(pid,did)=>{try{await sb.del(cfg.url,cfg.key,T(),"ideas",did);mutate(pid,p=>({...p,ideas:p.ideas.filter(d=>d.id!==did)}));showToast("Idea removed");}catch(e){showToast(e.message,"err");}};
   const reorderIdeas=async(pid,reordered)=>{mutate(pid,p=>({...p,ideas:reordered}));try{await Promise.all(reordered.map((d,i)=>sb.patch(cfg.url,cfg.key,T(),"ideas",d.id,{position:i})));}catch{}};
 
+  // ── Issue / Todo priority ─────────────────────────────────────────────────────
+  const updateIssuePriority=async(pid,iid,priority)=>{try{await sb.patch(cfg.url,cfg.key,T(),"issues",iid,{priority});mutate(pid,p=>({...p,issues:p.issues.map(i=>i.id===iid?{...i,priority}:i)}));}catch(e){showToast(e.message,"err");}};
+  const updateTodoPriority=async(pid,tid,priority)=>{try{await sb.patch(cfg.url,cfg.key,T(),"todos",tid,{priority});mutate(pid,p=>({...p,todos:p.todos.map(t=>t.id===tid?{...t,priority}:t)}));}catch(e){showToast(e.message,"err");}};
+
+  // ── Build Logs ────────────────────────────────────────────────────────────────
+  const addBuildLog=async(pid,b)=>{
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"build_logs",{project_id:pid,version_id:b.versionId||null,platform:b.platform||"android",build_number:b.buildNumber||null,build_size:b.buildSize||null,status:b.status||"building",store:b.store||null,notes:b.notes||null,built_at:b.builtAt||new Date().toISOString()});
+      mutate(pid,p=>({...p,buildLogs:[{id:row.id,versionId:row.version_id,platform:row.platform,buildNumber:row.build_number,buildSize:row.build_size,status:row.status,store:row.store,notes:row.notes,builtAt:row.built_at,createdAt:row.created_at},...p.buildLogs]}));
+      showToast("Build logged");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const updateBuildStatus=async(pid,bid,status)=>{try{await sb.patch(cfg.url,cfg.key,T(),"build_logs",bid,{status});mutate(pid,p=>({...p,buildLogs:p.buildLogs.map(b=>b.id===bid?{...b,status}:b)}));}catch(e){showToast(e.message,"err");}};
+  const deleteBuildLog=async(pid,bid)=>{try{await sb.del(cfg.url,cfg.key,T(),"build_logs",bid);mutate(pid,p=>({...p,buildLogs:p.buildLogs.filter(b=>b.id!==bid)}));showToast("Build removed");}catch(e){showToast(e.message,"err");}};
+
+  // ── Environments ──────────────────────────────────────────────────────────────
+  const addEnvironment=async(pid,env)=>{
+    const position=projects.find(p=>p.id===pid)?.environments?.length||0;
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"environments",{project_id:pid,name:env.name,url:env.url||null,color:env.color||"#8B8FA8",variables:env.variables||[],notes:env.notes||null,position});
+      mutate(pid,p=>({...p,environments:[...p.environments,{id:row.id,name:row.name,url:row.url,color:row.color,variables:row.variables||[],notes:row.notes,position:row.position,createdAt:row.created_at}]}));
+      showToast("Environment added");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const updateEnvironment=async(pid,eid,env)=>{
+    try{await sb.patch(cfg.url,cfg.key,T(),"environments",eid,{name:env.name,url:env.url||null,color:env.color,variables:env.variables||[],notes:env.notes||null});mutate(pid,p=>({...p,environments:p.environments.map(e=>e.id===eid?{...e,...env}:e)}));showToast("Environment updated");}
+    catch(e){showToast(e.message,"err");}
+  };
+  const deleteEnvironment=async(pid,eid)=>{try{await sb.del(cfg.url,cfg.key,T(),"environments",eid);mutate(pid,p=>({...p,environments:p.environments.filter(e=>e.id!==eid)}));showToast("Environment removed");}catch(e){showToast(e.message,"err");}};
+
+  // ── Dependencies ──────────────────────────────────────────────────────────────
+  const addDependency=async(pid,d)=>{
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"dependencies",{project_id:pid,name:d.name,current_version:d.currentVersion||null,latest_version:d.latestVersion||null,type:d.type||"npm",status:d.status||"ok",notes:d.notes||null});
+      mutate(pid,p=>({...p,dependencies:[...p.dependencies,{id:row.id,name:row.name,currentVersion:row.current_version,latestVersion:row.latest_version,type:row.type,status:row.status,notes:row.notes,createdAt:row.created_at}]}));
+      showToast("Dependency added");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const updateDepStatus=async(pid,did,status)=>{try{await sb.patch(cfg.url,cfg.key,T(),"dependencies",did,{status});mutate(pid,p=>({...p,dependencies:p.dependencies.map(d=>d.id===did?{...d,status}:d)}));}catch(e){showToast(e.message,"err");}};
+  const deleteDependency=async(pid,did)=>{try{await sb.del(cfg.url,cfg.key,T(),"dependencies",did);mutate(pid,p=>({...p,dependencies:p.dependencies.filter(d=>d.id!==did)}));showToast("Dependency removed");}catch(e){showToast(e.message,"err");}};
+
+  // ── Tags ──────────────────────────────────────────────────────────────────────
+  const addTag=async(name,color)=>{
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"tags",{user_id:session.user.id,name,color});
+      setUserTags(ts=>[...ts,{id:row.id,name:row.name,color:row.color}].sort((a,b)=>a.name.localeCompare(b.name)));
+      showToast("Tag created");
+      return row;
+    }catch(e){showToast(e.message,"err");return null;}
+  };
+  const deleteTag=async(tid)=>{
+    try{
+      await sb.del(cfg.url,cfg.key,T(),"tags",tid);
+      setUserTags(ts=>ts.filter(t=>t.id!==tid));
+      // Remove from all projects locally
+      setProjects(ps=>ps.map(p=>({...p,tagIds:(p.tagIds||[]).filter(id=>id!==tid)})));
+      showToast("Tag deleted");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const assignTag=async(pid,tagId)=>{
+    try{
+      await sb.post(cfg.url,cfg.key,T(),"project_tags",{project_id:pid,tag_id:tagId});
+      mutate(pid,p=>({...p,tagIds:[...(p.tagIds||[]),tagId]}));
+    }catch(e){showToast(e.message,"err");}
+  };
+  const unassignTag=async(pid,tagId)=>{
+    try{
+      await fetch(`${cfg.url}/rest/v1/project_tags?project_id=eq.${pid}&tag_id=eq.${tagId}`,{method:"DELETE",headers:sb.h(cfg.key,T())});
+      mutate(pid,p=>({...p,tagIds:(p.tagIds||[]).filter(id=>id!==tagId)}));
+    }catch(e){showToast(e.message,"err");}
+  };
+
   // ── Concepts ──────────────────────────────────────────────────────────────────
   const addConcept=async(pid,c)=>{try{const row=await sb.post(cfg.url,cfg.key,T(),"concepts",{project_id:pid,type:c.type||"text",label:c.label||null,content:c.content});mutate(pid,p=>({...p,concepts:[{id:row.id,type:row.type,label:row.label,content:row.content,createdAt:row.created_at},...p.concepts]}));showToast("Concept added");}catch(e){showToast(e.message,"err");}};
   const deleteConcept=async(pid,cid)=>{try{await sb.del(cfg.url,cfg.key,T(),"concepts",cid);mutate(pid,p=>({...p,concepts:p.concepts.filter(c=>c.id!==cid)}));showToast("Concept removed");}catch(e){showToast(e.message,"err");}};
   const uploadConceptFile=async(pid,file,label,type)=>{try{showToast("Uploading…","info");const url=await sb.uploadFile(cfg.url,cfg.key,T(),session.user.id,pid,file);await addConcept(pid,{type,label:label||file.name,content:url});}catch(e){showToast(e.message,"err");}};
 
-  // ── Nav ───────────────────────────────────────────────────────────────────────
+  // ── Templates ─────────────────────────────────────────────────────────────────
+  const loadTemplates=async()=>{
+    try{
+      const rows=await sb.get(cfg.url,cfg.key,T(),"project_templates",`?user_id=eq.${session.user.id}&order=created_at.desc`);
+      setTemplates(rows.map(r=>({id:r.id,name:r.name,description:r.description,templateData:r.template_data,createdAt:r.created_at})));
+    }catch{}
+  };
+  const saveTemplate=async(pid,templateName)=>{
+    const proj=projects.find(p=>p.id===pid);if(!proj)return;
+    const templateData={status:proj.status,techStack:proj.techStack,gitUrl:proj.gitUrl,supabaseUrl:proj.supabaseUrl,vercelUrl:proj.vercelUrl,milestones:(proj.milestones||[]).map(m=>({title:m.title,description:m.description})),todos:(proj.todos||[]).filter(t=>!t.completed).map(t=>({text:t.text,priority:t.priority})),environments:(proj.environments||[]).map(e=>({name:e.name,color:e.color,url:"",variables:(e.variables||[]).filter(v=>!v.masked)}))};
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"project_templates",{user_id:session.user.id,name:templateName,description:proj.description,template_data:templateData});
+      setTemplates(ts=>[{id:row.id,name:row.name,description:row.description,templateData:row.template_data,createdAt:row.created_at},...ts]);
+      showToast("Template saved");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const deleteTemplate=async(tid)=>{try{await sb.del(cfg.url,cfg.key,T(),"project_templates",tid);setTemplates(ts=>ts.filter(t=>t.id!==tid));showToast("Template deleted");}catch(e){showToast(e.message,"err");}};
+  const applyTemplate=async(pid,tid)=>{
+    const tpl=templates.find(t=>t.id===tid);if(!tpl)return;
+    const td=tpl.templateData||{};
+    try{
+      await Promise.all([
+        ...(td.milestones||[]).map(m=>addMilestone(pid,m)),
+        ...(td.todos||[]).map(t=>addTodo(pid,t.text,t.priority||"medium")),
+        ...(td.environments||[]).map(e=>addEnvironment(pid,e)),
+      ]);
+      showToast("Template applied");
+    }catch(e){showToast(e.message,"err");}
+  };
+
+  // ── GitHub ────────────────────────────────────────────────────────────────────
+  const refreshGitHub=async(pid)=>{
+    const proj=projects.find(p=>p.id===pid);if(!proj)return;
+    const repo=parseGitHubRepo(proj.gitUrl);
+    if(!repo){showToast("No valid GitHub URL on this project","err");return;}
+    showToast("Fetching GitHub data…","info");
+    try{
+      const data=await fetchGitHubAPI(repo.owner,repo.repo,null);
+      setGhCache(c=>({...c,[pid]:data}));
+      try{
+        const ex=await sb.get(cfg.url,cfg.key,T(),"github_cache",`?project_id=eq.${pid}`);
+        if(ex.length){await fetch(`${cfg.url}/rest/v1/github_cache?project_id=eq.${pid}`,{method:"PATCH",headers:sb.h(cfg.key,T()),body:JSON.stringify({data,fetched_at:data.fetchedAt})});}
+        else{await sb.post(cfg.url,cfg.key,T(),"github_cache",{project_id:pid,data,fetched_at:data.fetchedAt});}
+      }catch{}
+      if(data.error)showToast("GitHub rate limited. Add a token for higher limits.","info");
+      else showToast(`Loaded ${data.commits?.length||0} commits, ${data.issues?.length||0} issues, ${data.prs?.length||0} PRs`);
+    }catch(e){showToast(e.message,"err");}
+  };
+  const loadGitHubCache=async(pid)=>{
+    if(ghCache[pid])return;
+    try{const rows=await sb.get(cfg.url,cfg.key,T(),"github_cache",`?project_id=eq.${pid}`);if(rows?.[0])setGhCache(c=>({...c,[pid]:{...rows[0].data,fetchedAt:rows[0].fetched_at}}));}catch{}
+  };
+
+  // ── Public sharing ────────────────────────────────────────────────────────────
+  const togglePublic=async(pid)=>{
+    const proj=projects.find(p=>p.id===pid);if(!proj)return;
+    const makePublic=!proj.isPublic;
+    const slug=makePublic&&!proj.publicSlug?generateSlug(proj.name):proj.publicSlug;
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"projects",pid,{is_public:makePublic,public_slug:makePublic?slug:proj.publicSlug});
+      mutate(pid,p=>({...p,isPublic:makePublic,publicSlug:slug}));
+      showToast(makePublic?"Project is now public — share the link from the project header":"Project is now private");
+    }catch(e){showToast(e.message,"err");}
+  };
   const openProject=useCallback((proj)=>{
     const live=projRef.current.find(p=>p.id===proj.id)||proj;
     setSelProj(live);setProjTab(tab=>tab||"overview");setView("project");
@@ -393,6 +745,7 @@ export default function QoderApp() {
 
   const filtered=projects
     .filter(p=>filter==="all"||p.status===filter)
+    .filter(p=>!tagFilter||(p.tagIds||[]).includes(tagFilter))
     .filter(p=>p.name.toLowerCase().includes(search.toLowerCase())||(p.description||"").toLowerCase().includes(search.toLowerCase()));
 
   if(screen==="loading")return<Splash msg="Loading…"/>;
@@ -439,7 +792,7 @@ export default function QoderApp() {
       <main style={s.main}>
         {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"#E8EAF6"}}>oder</span></div><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div>}
 
-        {view==="dashboard"&&<Dashboard projects={filtered} allProjects={projects} isMobile={isMobile} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} onOpen={openProject} onNew={()=>openModal("add-project",{status:"planning",techStack:[]})}/>}
+        {view==="dashboard"&&<Dashboard projects={filtered} allProjects={projects} isMobile={isMobile} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} userTags={userTags} tagFilter={tagFilter} setTagFilter={setTagFilter} onOpen={openProject} onNew={()=>openModal("add-project",{status:"planning",techStack:[],tagIds:[]})}/>}
         {view==="project"&&liveProj&&(
           <ProjectView project={liveProj} tab={projTab} setTab={setProjTab} isMobile={isMobile} tabOrder={tabOrder}
             onAddVersion={()=>openModal("add-version",{fileLinks:[""]})}
@@ -451,16 +804,26 @@ export default function QoderApp() {
             onEditNote={n=>openModal("edit-note",{...n})}
             onDeleteNote={nid=>deleteNote(liveProj.id,nid)}
             onReorderNotes={r=>reorderNotes(liveProj.id,r)}
-            onAddTodo={text=>addTodo(liveProj.id,text)}
+            onAddTodo={(text,priority)=>addTodo(liveProj.id,text,priority)}
             onToggleTodo={tid=>toggleTodo(liveProj.id,tid)}
             onDeleteTodo={tid=>deleteTodo(liveProj.id,tid)}
             onReorderTodos={r=>reorderTodos(liveProj.id,r)}
             onAddAsset={()=>openModal("add-asset",{type:"Link"})}
             onDeleteAsset={aid=>deleteAsset(liveProj.id,aid)}
             onUploadAssetFile={(file,name,type)=>uploadAssetFile(liveProj.id,file,name,type)}
-            onAddIssue={()=>openModal("add-issue",{})}
+            onAddIssue={()=>openModal("add-issue",{priority:"medium"})}
             onFixIssue={iss=>openModal("fix-issue",{...iss})}
             onDeleteIssue={iid=>deleteIssue(liveProj.id,iid)}
+            onUpdateIssuePriority={(iid,p)=>updateIssuePriority(liveProj.id,iid,p)}
+            onAddBuildLog={()=>openModal("add-build",{platform:"android",status:"building",versionId:liveProj.versions?.[0]?.id||""})}
+            onUpdateBuildStatus={(bid,st)=>updateBuildStatus(liveProj.id,bid,st)}
+            onDeleteBuildLog={bid=>deleteBuildLog(liveProj.id,bid)}
+            onAddEnvironment={()=>openModal("add-env",{color:"#4ADE80",variables:[]})}
+            onEditEnvironment={env=>openModal("edit-env",{...env})}
+            onDeleteEnvironment={eid=>deleteEnvironment(liveProj.id,eid)}
+            onAddDependency={()=>openModal("add-dep",{type:"npm",status:"ok"})}
+            onUpdateDepStatus={(did,st)=>updateDepStatus(liveProj.id,did,st)}
+            onDeleteDependency={did=>deleteDependency(liveProj.id,did)}
             onAddIdea={()=>openModal("add-idea",{})}
             onEditIdea={idea=>openModal("edit-idea",{...idea})}
             onToggleIdeaPin={did=>toggleIdeaPin(liveProj.id,did)}
@@ -470,15 +833,30 @@ export default function QoderApp() {
             onDeleteConcept={cid=>deleteConcept(liveProj.id,cid)}
             onUploadConceptFile={(file,label,type)=>uploadConceptFile(liveProj.id,file,label,type)}
             onLightbox={(url,name)=>setLightbox({url,name})}
-            onEdit={()=>openModal("edit-project",{...liveProj})}
-            onDelete={async()=>{if(await qConfirm("Delete this project? This cannot be undone."))deleteProject(liveProj.id);}}/>
+            onEdit={()=>openModal("edit-project",{...liveProj,tagIds:liveProj.tagIds||[]})}
+            onDelete={async()=>{if(await qConfirm("Delete this project? This cannot be undone."))deleteProject(liveProj.id);}}
+            onArchive={async()=>{if(await qConfirm("Archive this project? A JSON export will be downloaded first."))archiveProject(liveProj.id);}}
+            onChangelog={()=>openModal("changelog",{})}
+            userTags={userTags}
+            githubData={ghCache[liveProj.id]||null}
+            onRefreshGitHub={()=>refreshGitHub(liveProj.id)}
+            onLoadGitHubCache={()=>loadGitHubCache(liveProj.id)}
+            templates={templates}
+            onSaveTemplate={name=>saveTemplate(liveProj.id,name)}
+            onApplyTemplate={tid=>applyTemplate(liveProj.id,tid)}
+            onOpenSaveTemplate={()=>openModal("save-template",{name:`${liveProj.name} Template`})}
+            onExportJSON={()=>exportProjectJSON(liveProj)}
+            onExportPDF={()=>exportProjectPDF(liveProj)}
+            onTogglePublic={()=>togglePublic(liveProj.id)}
+            onCopyPublicLink={()=>{const url=`${window.location.origin}${window.location.pathname}?public=${liveProj.publicSlug}`;navigator.clipboard.writeText(url).then(()=>showToast("Public link copied","ok")).catch(()=>showToast("Copy link from browser address bar","info"));}}/>
         )}
       </main>
 
       {/* Modals */}
       {modal&&<ModalWrap onClose={closeModal}>
-        {modal==="add-project"  &&<ProjectForm   data={form} setData={setForm} title="New Project"  onSubmit={d=>{addProject(d);closeModal();}}                          onCancel={closeModal}/>}
-        {modal==="edit-project" &&<ProjectForm   data={form} setData={setForm} title="Edit Project" onSubmit={d=>{updateProject(selProj.id,d);closeModal();}}             onCancel={closeModal}/>}
+        {modal==="add-project"  &&<ProjectForm   data={form} setData={setForm} title="New Project"  userTags={userTags} templates={templates} onSubmit={async d=>{const proj=await addProjectAndReturn(d);if(proj&&d.tagIds?.length)await Promise.all(d.tagIds.map(tid=>assignTag(proj.id,tid)));closeModal();}} onCancel={closeModal}/>}
+        {modal==="edit-project" &&<ProjectForm   data={form} setData={setForm} title="Edit Project" userTags={userTags} templates={templates} onSubmit={async d=>{await updateProject(selProj.id,d);const cur=selProj.tagIds||[];const add=(d.tagIds||[]).filter(id=>!cur.includes(id));const rem=cur.filter(id=>!(d.tagIds||[]).includes(id));await Promise.all([...add.map(id=>assignTag(selProj.id,id)),...rem.map(id=>unassignTag(selProj.id,id))]);closeModal();}} onCancel={closeModal}/>}
+        {modal==="changelog"    &&<ChangelogModal project={liveProj||selProj} onClose={closeModal}/>}
         {modal==="add-version"  &&<VersionForm   data={form} setData={setForm} onSubmit={d=>{addVersion(selProj.id,d);closeModal();}}                                     onCancel={closeModal}/>}
         {modal==="add-milestone"&&<MilestoneForm data={form} setData={setForm} onSubmit={d=>{addMilestone(selProj.id,d);closeModal();}}                                   onCancel={closeModal}/>}
         {modal==="add-note"     &&<NoteForm      data={form} setData={setForm} title="Add Note"  onSubmit={d=>{addNote(selProj.id,d.content);closeModal();}}              onCancel={closeModal}/>}
@@ -486,10 +864,16 @@ export default function QoderApp() {
         {modal==="add-asset"    &&<AssetForm     data={form} setData={setForm} onSubmit={d=>{addAsset(selProj.id,d);closeModal();}}                                       onCancel={closeModal}/>}
         {modal==="add-issue"    &&<IssueForm     data={form} setData={setForm} onSubmit={d=>{addIssue(selProj.id,d);closeModal();}}                                       onCancel={closeModal}/>}
         {modal==="fix-issue"    &&<FixIssueModal data={form} setData={setForm} onSubmit={d=>{fixIssue(selProj.id,d.id,d.fixDescription);closeModal();}}                  onCancel={closeModal}/>}
+        {modal==="add-build"    &&<BuildLogForm  data={form} setData={setForm} versions={selProj?.versions||[]} onSubmit={d=>{addBuildLog(selProj.id,d);closeModal();}}  onCancel={closeModal}/>}
+        {modal==="add-env"      &&<EnvironmentForm data={form} setData={setForm} title="Add Environment" onSubmit={d=>{addEnvironment(selProj.id,d);closeModal();}}      onCancel={closeModal}/>}
+        {modal==="edit-env"     &&<EnvironmentForm data={form} setData={setForm} title="Edit Environment" onSubmit={d=>{updateEnvironment(selProj.id,d.id,d);closeModal();}} onCancel={closeModal}/>}
+        {modal==="add-dep"      &&<DependencyForm data={form} setData={setForm} onSubmit={d=>{addDependency(selProj.id,d);closeModal();}}                                  onCancel={closeModal}/>}
         {modal==="add-idea"     &&<IdeaForm      data={form} setData={setForm} title="Add Idea"  onSubmit={d=>{addIdea(selProj.id,d.content);closeModal();}}              onCancel={closeModal}/>}
         {modal==="edit-idea"    &&<IdeaForm      data={form} setData={setForm} title="Edit Idea" onSubmit={d=>{updateIdea(selProj.id,d.id,d.content);closeModal();}}      onCancel={closeModal}/>}
         {modal==="add-concept"  &&<ConceptForm   data={form} setData={setForm} cfg={cfg} session={session} projectId={selProj?.id} onSubmit={d=>{addConcept(selProj.id,d);closeModal();}} onUploadFile={(file,label,type)=>{uploadConceptFile(selProj.id,file,label,type);closeModal();}} onCancel={closeModal}/>}
-        {modal==="settings"     &&<SettingsModal tabOrder={tabOrder} onSave={order=>{saveTabOrderSync(order);closeModal();}} onCancel={closeModal}/>}
+        {modal==="save-template" &&<SaveTemplateModal data={form} setData={setForm} onSubmit={d=>{saveTemplate(selProj.id,d.name);closeModal();}} onCancel={closeModal}/>}
+        {modal==="manage-templates"&&<ManageTemplatesModal templates={templates} onDelete={deleteTemplate} onApply={tid=>{if(selProj){applyTemplate(selProj.id,tid);}closeModal();}} onCancel={closeModal}/>}
+        {modal==="settings"     &&<SettingsModal tabOrder={tabOrder} userTags={userTags} templates={templates} onSave={order=>{saveTabOrderSync(order);closeModal();}} onAddTag={addTag} onDeleteTag={deleteTag} onOpenTemplates={()=>openModal("manage-templates",{})} onCancel={closeModal}/>}
       </ModalWrap>}
     </div>
   );
@@ -555,52 +939,166 @@ function DraggableSidebarList({items,onReorder,children}){
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
-function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFilter,onOpen,onNew}){
+function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFilter,userTags,tagFilter,setTagFilter,onOpen,onNew}){
+  const [feedPeriod,setFeedPeriod]=useState("7d");
+  const [showFeed,setShowFeed]=useState(true);
   const stats={total:allProjects.length,inDev:allProjects.filter(p=>p.status==="in-dev").length,released:allProjects.filter(p=>p.status==="released").length,open:allProjects.reduce((a,p)=>a+(p.milestones?.filter(m=>!m.completed).length||0),0)};
+  const contentResults=search.length>=2?searchAllContent(allProjects,search):[];
+  const showContentResults=contentResults.length>0;
+
+  // Activity feed across all projects
+  const cutoffMs=TIME_PERIODS.find(p=>p.key===feedPeriod)?.ms||null;
+  const allActivity=buildActivityFeed(allProjects);
+  const feedItems=cutoffMs?allActivity.filter(i=>Date.now()-i.date.getTime()<=cutoffMs):allActivity;
+
   return(
     <div style={{...s.page,padding:isMobile?"16px 14px":"36px 40px"}}>
-      <div style={{...s.pageHead,marginBottom:isMobile?16:26}}>
+      <div style={{...s.pageHead,marginBottom:isMobile?16:24}}>
         <div><h1 style={{...s.pageTitle,fontSize:isMobile?20:27}}>Dashboard</h1><p style={s.pageSub}>Cloud-synced across all devices</p></div>
         {!isMobile&&<button className="q-btn-primary" onClick={onNew}>+ New Project</button>}
       </div>
+
+      {/* Stats */}
       <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:isMobile?8:12,marginBottom:isMobile?14:20}}>
         {[{label:isMobile?"Total":"Total Projects",value:stats.total,color:"#00D4FF"},{label:isMobile?"In Dev":"In Development",value:stats.inDev,color:"#FFB347"},{label:"Released",value:stats.released,color:"#4ADE80"},{label:isMobile?"Open":"Open Milestones",value:stats.open,color:"#FF6B9D"}].map(st=>(
           <div key={st.label} style={s.statCard}><div style={{...s.statVal,color:st.color,fontSize:isMobile?20:26}}>{st.value}</div><div style={s.statLbl}>{st.label}</div></div>
         ))}
       </div>
-      <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:8,marginBottom:14}}>
-        <input className="q-input" style={{maxWidth:isMobile?"100%":300,width:"100%",marginTop:0}} placeholder="Search projects…" value={search} onChange={e=>setSearch(e.target.value)}/>
-        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{["all",...Object.keys(STATUS_CONFIG)].map(k=><button key={k} className={`q-chip${filter===k?" q-chip-on":""}`} onClick={()=>setFilter(k)}>{k==="all"?"All":STATUS_CONFIG[k].label}</button>)}</div>
+
+      {/* Search + status filters */}
+      <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:8,marginBottom:10}}>
+        <input className="q-input" style={{maxWidth:isMobile?"100%":320,width:"100%",marginTop:0}} placeholder="Search projects & content…" value={search} onChange={e=>setSearch(e.target.value)}/>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+          {["all",...Object.keys(STATUS_CONFIG)].map(k=><button key={k} className={`q-chip${filter===k?" q-chip-on":""}`} onClick={()=>setFilter(k)}>{k==="all"?"All":STATUS_CONFIG[k].label}</button>)}
+        </div>
       </div>
-      {projects.length===0?(<div style={s.empty}><div style={s.emptyIcon}>⬡</div><p>{allProjects.length===0?"No projects yet.":"No projects match filters."}</p><button className="q-btn-primary" onClick={onNew}>+ New Project</button></div>):(
-        <>{isMobile&&<button className="q-btn-primary" style={{width:"100%",marginBottom:12}} onClick={onNew}>+ New Project</button>}
-        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(270px,1fr))",gap:isMobile?10:13}}>{projects.map(p=><ProjectCard key={p.id} project={p} onClick={()=>onOpen(p)}/>)}</div></>
+
+      {/* Tag filter */}
+      {userTags?.length>0&&(
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:14}}>
+          <button className={`q-chip${!tagFilter?" q-chip-on":""}`} onClick={()=>setTagFilter(null)} style={{fontSize:11}}>All Tags</button>
+          {userTags.map(t=><button key={t.id} className={`q-chip${tagFilter===t.id?" q-chip-on":""}`} onClick={()=>setTagFilter(tagFilter===t.id?null:t.id)} style={{fontSize:11,borderColor:tagFilter===t.id?t.color:undefined,color:tagFilter===t.id?t.color:undefined}}><span style={{width:7,height:7,borderRadius:"50%",background:t.color,display:"inline-block",marginRight:5}}/>{t.name}</button>)}
+        </div>
+      )}
+
+      {/* Cross-project content search results */}
+      {showContentResults&&(
+        <div style={{marginBottom:20}}>
+          <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>
+            Content matches ({contentResults.length})
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {contentResults.slice(0,12).map((r,i)=>{const meta=FEED_META[r.type]||FEED_META.note;return(
+              <div key={i} onClick={()=>onOpen(allProjects.find(p=>p.id===r.projectId)||{})} style={{display:"flex",gap:10,padding:"10px 14px",background:"#111627",border:"1px solid #1A2040",borderRadius:9,cursor:"pointer",alignItems:"flex-start",transition:"border-color .2s"}} className="q-card">
+                <span style={{fontSize:11,color:meta.color,flexShrink:0,marginTop:1}}>{meta.icon}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}>
+                    <span style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:meta.color,fontWeight:700}}>{r.label.toUpperCase()}</span>
+                    <span style={{fontSize:12,color:"#6B7290",fontFamily:"'Syne'",fontWeight:600}}>{r.projectName}</span>
+                  </div>
+                  <p style={{color:"#C0C6E0",fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.excerpt}</p>
+                </div>
+              </div>
+            );})}
+            {contentResults.length>12&&<p style={{...s.mono10,textAlign:"center",color:"#4B5268"}}>+{contentResults.length-12} more results</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Project cards */}
+      {isMobile&&<button className="q-btn-primary" style={{width:"100%",marginBottom:12}} onClick={onNew}>+ New Project</button>}
+      {projects.length===0?(
+        <div style={s.empty}><div style={s.emptyIcon}>⬡</div><p>{allProjects.length===0?"No projects yet.":"No projects match filters."}</p>{allProjects.length===0&&<button className="q-btn-primary" onClick={onNew}>+ New Project</button>}</div>
+      ):(
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(270px,1fr))",gap:isMobile?10:13,marginBottom:32}}>
+          {projects.map(p=><ProjectCard key={p.id} project={p} userTags={userTags} onClick={()=>onOpen(p)}/>)}
+        </div>
+      )}
+
+      {/* Activity Feed */}
+      {allProjects.length>0&&(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <button onClick={()=>setShowFeed(v=>!v)} style={{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",color:"#E8EAF6",fontFamily:"'Syne'",fontWeight:700,fontSize:15}}>
+              <span style={{color:"#00D4FF"}}>{showFeed?"▾":"▸"}</span> Activity Feed
+              <span style={{...s.mono10,color:"#4B5268",marginLeft:4}}>across all projects</span>
+            </button>
+            {showFeed&&<div style={{display:"flex",gap:4}}>
+              {TIME_PERIODS.map(p=><button key={p.key} className={`q-chip${feedPeriod===p.key?" q-chip-on":""}`} style={{fontSize:11,padding:"3px 9px"}} onClick={()=>setFeedPeriod(p.key)}>{p.label}</button>)}
+            </div>}
+          </div>
+          {showFeed&&(
+            feedItems.length===0?<div style={{...s.empty,padding:"28px 0"}}><p>No activity in this period.</p></div>:(
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {feedItems.slice(0,30).map((item,i)=>{const meta=FEED_META[item.type]||FEED_META.note;return(
+                  <div key={i} onClick={()=>onOpen(allProjects.find(p=>p.id===item.projectId)||{})} style={{display:"flex",gap:12,padding:"11px 14px",background:"#111627",border:"1px solid #1A2040",borderRadius:10,cursor:"pointer",alignItems:"flex-start"}} className="q-card">
+                    <div style={{width:26,height:26,borderRadius:6,background:`${meta.color}14`,border:`1px solid ${meta.color}28`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,flexShrink:0}}>{meta.icon}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
+                        <span style={{fontSize:10,fontFamily:"'JetBrains Mono'",color:meta.color,fontWeight:700}}>{meta.label.toUpperCase()}</span>
+                        <span style={{fontSize:12,color:"#6B7290",fontFamily:"'Syne'",fontWeight:600}}>{item.projectName}</span>
+                        {item.title&&<span style={{color:"#C0C6E0",fontSize:13,fontWeight:500}}>{item.title}</span>}
+                      </div>
+                      {item.content&&<p style={{color:"#8B8FA8",fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.content}</p>}
+                    </div>
+                    <span style={{...s.mono10,flexShrink:0,marginTop:3}}>{item.date.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
+                  </div>
+                );})}
+                {feedItems.length>30&&<p style={{...s.mono10,textAlign:"center",color:"#4B5268",marginTop:4}}>+{feedItems.length-30} older items</p>}
+              </div>
+            )
+          )}
+        </div>
       )}
     </div>
   );
 }
 
-function ProjectCard({project,onClick}){
+function ProjectCard({project,userTags,onClick}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const msTotal=project.milestones?.length||0;const msDone=project.milestones?.filter(m=>m.completed).length||0;
   const pct=msTotal>0?Math.round((msDone/msTotal)*100):null;
+  const tags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
   return(
     <div className="q-card" onClick={onClick}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{...s.badge,color:cfg.color,background:cfg.bg}}>{cfg.label}</span><span style={s.mono12}>{latVer}</span></div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <span style={{...s.badge,color:cfg.color,background:cfg.bg}}>{cfg.label}</span>
+        <span style={s.mono12}>{latVer}</span>
+      </div>
       <h3 style={s.cardTitle}>{project.name}</h3>
       {project.description&&<p style={s.cardDesc}>{project.description}</p>}
-      {project.techStack?.length>0&&<div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:12}}>{project.techStack.slice(0,4).map(t=><span key={t} style={s.techChip}>{t}</span>)}{project.techStack.length>4&&<span style={s.techChip}>+{project.techStack.length-4}</span>}</div>}
+      {tags.length>0&&(
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:9}}>
+          {tags.map(t=><span key={t.id} style={{fontSize:10,padding:"2px 8px",borderRadius:10,background:`${t.color}18`,border:`1px solid ${t.color}40`,color:t.color,fontFamily:"'Syne'",fontWeight:600}}>{t.name}</span>)}
+        </div>
+      )}
+      {project.techStack?.length>0&&<div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>{project.techStack.slice(0,4).map(t=><span key={t} style={s.techChip}>{t}</span>)}{project.techStack.length>4&&<span style={s.techChip}>+{project.techStack.length-4}</span>}</div>}
       {pct!==null&&<div style={{display:"flex",alignItems:"center",gap:8}}><div style={s.bar}><div style={{...s.barFill,width:`${pct}%`}}/></div><span style={s.mono10}>{msDone}/{msTotal}</span></div>}
     </div>
   );
 }
 
 // ── ProjectView ───────────────────────────────────────────────────────────────
-function ProjectView({project,tab,setTab,isMobile,tabOrder,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onEdit,onDelete}){
+function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onEdit,onArchive,onDelete}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
-  const tabCounts={overview:null,versions:project.versions?.length||0,milestones:project.milestones?.length||0,todos:project.todos?.filter(t=>!t.completed).length||0,notes:project.notes?.length||0,assets:project.assets?.length||0,issues:project.issues?.filter(i=>i.status==="open").length||0,ideas:project.ideas?.length||0,concepts:project.concepts?.length||0};
+  const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
+  const tabCounts={
+    overview:null,
+    versions:project.versions?.length||0,
+    milestones:project.milestones?.length||0,
+    todos:project.todos?.filter(t=>!t.completed).length||0,
+    notes:project.notes?.length||0,
+    assets:project.assets?.length||0,
+    issues:project.issues?.filter(i=>i.status==="open").length||0,
+    "build-log":project.buildLogs?.length||0,
+    environments:project.environments?.length||0,
+    dependencies:project.dependencies?.filter(d=>d.status!=="ok").length||0,
+    ideas:project.ideas?.length||0,
+    concepts:project.concepts?.length||0,
+    github:parseGitHubRepo(project.gitUrl)?githubData?.commits?.length||0:0,
+  };
   return(
     <div style={{...s.page,padding:isMobile?"14px":"36px 40px"}}>
       <div style={{...s.projHead,marginBottom:isMobile?14:22}}>
@@ -610,6 +1108,12 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,onAddVersion,onAddMil
             <span style={{...s.badge,color:cfg.color,background:cfg.bg,fontSize:11,padding:"3px 8px"}}>{cfg.label}</span>
           </div>
           {project.description&&<p style={s.pageSub}>{project.description}</p>}
+          {/* Tags */}
+          {projTags.length>0&&(
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+              {projTags.map(t=><span key={t.id} style={{fontSize:11,padding:"3px 10px",borderRadius:12,background:`${t.color}18`,border:`1px solid ${t.color}40`,color:t.color,fontFamily:"'Syne'",fontWeight:600}}>{t.name}</span>)}
+            </div>
+          )}
           {/* Project links */}
           {(project.gitUrl||project.supabaseUrl||project.vercelUrl)&&(
             <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
@@ -619,8 +1123,20 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,onAddVersion,onAddMil
             </div>
           )}
         </div>
-        <div style={{display:"flex",gap:6,flexShrink:0}}>
+        <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
+          {/* Export / share dropdown on mobile, full buttons on desktop */}
+          {!isMobile&&<>
+            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportPDF} title="Export PDF">📄 PDF</button>
+            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportJSON} title="Export JSON">⬇ JSON</button>
+            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12,color:project.isPublic?"#4ADE80":undefined}} onClick={onTogglePublic} title={project.isPublic?"Make private":"Make public"}>{project.isPublic?"🌐 Public":"🔒 Private"}</button>
+            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onOpenSaveTemplate} title="Save as template">💾 Template</button>
+          </>}
+          {project.isPublic&&project.publicSlug&&(
+            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12,color:"#4ADE80"}} onClick={onCopyPublicLink} title="Copy public link">🔗 Copy Link</button>
+          )}
+          <button className="q-btn-ghost" style={{padding:isMobile?"6px 10px":"9px 14px",fontSize:isMobile?12:13}} onClick={onChangelog}>📋</button>
           <button className="q-btn-ghost" style={{padding:isMobile?"6px 10px":"9px 14px",fontSize:isMobile?12:13}} onClick={onEdit}>Edit</button>
+          {project.status!=="archived"&&<button className="q-btn-ghost" style={{padding:isMobile?"6px 10px":"9px 14px",fontSize:isMobile?12:13,color:"#8B8FA8"}} onClick={onArchive} title="Archive + export">Archive</button>}
           <button className="q-btn-danger" style={{padding:isMobile?"6px 10px":"9px 14px",fontSize:isMobile?12:13}} onClick={onDelete}>Delete</button>
         </div>
       </div>
@@ -632,14 +1148,18 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,onAddVersion,onAddMil
         ))}
       </div>
       {tab==="overview"   &&<OverviewTab   project={project} latestVer={latVer}/>}
-      {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion}   onDelete={onDeleteVersion}/>}
+      {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion} onDelete={onDeleteVersion} onChangelog={onChangelog}/>}
       {tab==="milestones" &&<MilestonesTab project={project} onAdd={onAddMilestone} onToggle={onToggleMilestone} onDelete={onDeleteMilestone}/>}
       {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos}/>}
       {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes}/>}
       {tab==="assets"     &&<AssetsTab     project={project} onAdd={onAddAsset}     onDelete={onDeleteAsset}    onUploadFile={onUploadAssetFile} onLightbox={onLightbox}/>}
-      {tab==="issues"     &&<IssuesTab     project={project} onAdd={onAddIssue}     onFix={onFixIssue}         onDelete={onDeleteIssue}/>}
+      {tab==="issues"     &&<IssuesTab     project={project} onAdd={onAddIssue}     onFix={onFixIssue}         onDelete={onDeleteIssue}  onUpdatePriority={onUpdateIssuePriority}/>}
+      {tab==="build-log"  &&<BuildLogTab   project={project} onAdd={onAddBuildLog}   onUpdateStatus={onUpdateBuildStatus} onDelete={onDeleteBuildLog}/>}
+      {tab==="environments"&&<EnvironmentsTab project={project} onAdd={onAddEnvironment} onEdit={onEditEnvironment} onDelete={onDeleteEnvironment}/>}
+      {tab==="dependencies"&&<DependenciesTab project={project} onAdd={onAddDependency} onUpdateStatus={onUpdateDepStatus} onDelete={onDeleteDependency}/>}
       {tab==="ideas"      &&<IdeasTab      project={project} onAdd={onAddIdea}      onEdit={onEditIdea}        onPin={onToggleIdeaPin}    onDelete={onDeleteIdea}    onReorder={onReorderIdeas}/>}
       {tab==="concepts"   &&<ConceptsTab   project={project} onAdd={onAddConcept}   onDelete={onDeleteConcept} onUploadFile={onUploadConceptFile} onLightbox={onLightbox}/>}
+      {tab==="github"     &&<GitHubTab     project={project} data={githubData}      onRefresh={onRefreshGitHub} onLoadCache={onLoadGitHubCache}/>}
     </div>
   );
 }
@@ -697,10 +1217,16 @@ function OverviewTab({project,latestVer}){
 }
 
 // ── Versions Tab ──────────────────────────────────────────────────────────────
-function VersionsTab({project,onAdd,onDelete}){
+function VersionsTab({project,onAdd,onDelete,onChangelog}){
   return(
     <div>
-      <div style={s.tabBar}><span style={s.mono12}>{project.versions?.length||0} releases</span><button className="q-btn-primary" onClick={onAdd}>+ Log Version</button></div>
+      <div style={s.tabBar}>
+        <span style={s.mono12}>{project.versions?.length||0} releases</span>
+        <div style={{display:"flex",gap:8}}>
+          {project.versions?.length>0&&<button className="q-btn-ghost" style={{fontSize:12,padding:"7px 12px"}} onClick={onChangelog}>📋 Changelog</button>}
+          <button className="q-btn-primary" onClick={onAdd}>+ Log Version</button>
+        </div>
+      </div>
       {!project.versions?.length?<div style={s.empty}><p>No versions logged yet.</p></div>:(
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           {project.versions.map((v,i)=>(
@@ -745,19 +1271,42 @@ function MilestonesTab({project,onAdd,onToggle,onDelete}){
 // ── Todo Tab ──────────────────────────────────────────────────────────────────
 function TodoTab({project,onAdd,onToggle,onDelete,onReorder}){
   const [newText,setNewText]=useState("");
-  const todos=project.todos||[];const pending=todos.filter(t=>!t.completed);const done=todos.filter(t=>t.completed);
-  const handleAdd=()=>{const t=newText.trim();if(!t)return;onAdd(t);setNewText("");};
+  const [newPriority,setNewPriority]=useState("medium");
+  const todos=project.todos||[];
+  const pending=todos.filter(t=>!t.completed).sort((a,b)=>{const o=["critical","high","medium","low"];return o.indexOf(a.priority||"medium")-o.indexOf(b.priority||"medium");});
+  const done=todos.filter(t=>t.completed);
+  const handleAdd=()=>{const t=newText.trim();if(!t)return;onAdd(t,newPriority);setNewText("");};
   return(
     <div>
       <div style={s.tabBar}><span style={s.mono12}>{done.length}/{todos.length} completed</span></div>
-      <div style={{display:"flex",gap:8,marginBottom:18}}><input className="q-input" style={{flex:1,marginTop:0}} value={newText} onChange={e=>setNewText(e.target.value)} placeholder="Add a to-do…" onKeyDown={e=>e.key==="Enter"&&handleAdd()}/><button className="q-btn-primary" style={{flexShrink:0,padding:"0 16px"}} onClick={handleAdd}>Add</button></div>
+      <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
+        <input className="q-input" style={{flex:1,minWidth:180,marginTop:0}} value={newText} onChange={e=>setNewText(e.target.value)} placeholder="Add a to-do…" onKeyDown={e=>e.key==="Enter"&&handleAdd()}/>
+        <select className="q-input" style={{width:130,marginTop:0}} value={newPriority} onChange={e=>setNewPriority(e.target.value)}>
+          {PRIORITY_KEYS.map(k=><option key={k} value={k}>{PRIORITY_CONFIG[k].icon} {PRIORITY_CONFIG[k].label}</option>)}
+        </select>
+        <button className="q-btn-primary" style={{flexShrink:0,padding:"0 16px"}} onClick={handleAdd}>Add</button>
+      </div>
       {todos.length===0&&<div style={s.empty}><p>No to-do items yet.</p></div>}
       {pending.length>0&&<DraggableList items={pending} onReorder={r=>onReorder([...r,...done])}>{todo=><TodoRow todo={todo} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}}/>}</DraggableList>}
       {done.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",padding:"14px 0 6px",fontWeight:700}}>Completed ({done.length})</div>{done.map(todo=><TodoRow key={todo.id} todo={todo} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}}/>)}</>}
     </div>
   );
 }
-function TodoRow({todo,onToggle,onDelete}){return(<div className="q-ms-row" style={{opacity:todo.completed?.5:1}}><span style={{color:"#3A4060",fontSize:16,cursor:"grab",userSelect:"none",flexShrink:0}}>⠿</span><button className={`q-check${todo.completed?" q-check-done":""}`} onClick={onToggle}>{todo.completed&&"✓"}</button><div style={{flex:1}}><span style={{color:"#E8EAF6",fontWeight:500,textDecoration:todo.completed?"line-through":"none",fontSize:14}}>{todo.text}</span>{todo.completed&&todo.completedAt&&<p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4ADE80",marginTop:3,opacity:.75}}>✓ {new Date(todo.completedAt).toLocaleDateString()} at {new Date(todo.completedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>}</div><button className="q-del" onClick={onDelete}>✕</button></div>);}
+function TodoRow({todo,onToggle,onDelete}){
+  const pc=PRIORITY_CONFIG[todo.priority||"medium"];
+  return(
+    <div className="q-ms-row" style={{opacity:todo.completed?.5:1}}>
+      <span style={{color:"#3A4060",fontSize:16,cursor:"grab",userSelect:"none",flexShrink:0}}>⠿</span>
+      <button className={`q-check${todo.completed?" q-check-done":""}`} onClick={onToggle}>{todo.completed&&"✓"}</button>
+      <span style={{fontSize:11,flexShrink:0,marginTop:1}} title={pc.label}>{pc.icon}</span>
+      <div style={{flex:1}}>
+        <span style={{color:"#E8EAF6",fontWeight:500,textDecoration:todo.completed?"line-through":"none",fontSize:14}}>{todo.text}</span>
+        {todo.completed&&todo.completedAt&&<p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4ADE80",marginTop:3,opacity:.75}}>✓ {new Date(todo.completedAt).toLocaleDateString()} at {new Date(todo.completedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>}
+      </div>
+      <button className="q-del" onClick={onDelete}>✕</button>
+    </div>
+  );
+}
 
 // ── Notes Tab ─────────────────────────────────────────────────────────────────
 function NotesTab({project,onAdd,onEdit,onDelete,onReorder}){
@@ -808,20 +1357,36 @@ function AssetsTab({project,onAdd,onDelete,onUploadFile,onLightbox}){
 }
 
 // ── Issues Tab ────────────────────────────────────────────────────────────────
-function IssuesTab({project,onAdd,onFix,onDelete}){
-  const issues=project.issues||[];const open=issues.filter(i=>i.status==="open");const fixed=issues.filter(i=>i.status==="fixed");
+function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority}){
+  const issues=project.issues||[];
+  const open=issues.filter(i=>i.status==="open").sort((a,b)=>{const o=["critical","high","medium","low"];return o.indexOf(a.priority)-o.indexOf(b.priority);});
+  const fixed=issues.filter(i=>i.status==="fixed");
   return(
     <div>
       <div style={s.tabBar}><span style={s.mono12}>{open.length} open · {fixed.length} fixed</span><button className="q-btn-primary" onClick={onAdd}>+ Log Issue</button></div>
       {issues.length===0&&<div style={s.empty}><p>No issues logged. 🎉</p></div>}
-      {open.length>0&&<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>{open.map(iss=>(
-        <div key={iss.id} className="q-ver-card">
+      {open.length>0&&<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>{open.map(iss=>{const pc=PRIORITY_CONFIG[iss.priority||"medium"];return(
+        <div key={iss.id} className="q-ver-card" style={{borderLeft:`3px solid ${pc.color}`}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
-            <div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}><span style={{width:8,height:8,borderRadius:"50%",background:"#FF6B9D",flexShrink:0,display:"inline-block"}}/><span style={{color:"#E8EAF6",fontWeight:600,fontSize:14}}>{iss.title}</span></div>{iss.description&&<p style={{color:"#8B8FA8",fontSize:13,lineHeight:1.6,marginLeft:16}}>{iss.description}</p>}<div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>Logged {new Date(iss.createdAt).toLocaleDateString()}</div></div>
-            <div style={{display:"flex",gap:6,flexShrink:0}}><button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12,borderColor:"rgba(74,222,128,.25)",color:"#4ADE80"}} onClick={()=>onFix(iss)}>Mark Fixed</button><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button></div>
+            <div style={{flex:1}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
+                <span style={{...s.badge,color:pc.color,background:pc.bg,fontSize:10}}>{pc.icon} {pc.label}</span>
+                <span style={{color:"#E8EAF6",fontWeight:600,fontSize:14}}>{iss.title}</span>
+              </div>
+              {iss.description&&<p style={{color:"#8B8FA8",fontSize:13,lineHeight:1.6,marginBottom:8}}>{iss.description}</p>}
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {PRIORITY_KEYS.map(pk=><button key={pk} onClick={()=>onUpdatePriority(iss.id,pk)} style={{fontSize:10,padding:"2px 8px",background:iss.priority===pk?PRIORITY_CONFIG[pk].bg:"transparent",border:`1px solid ${iss.priority===pk?PRIORITY_CONFIG[pk].color:"#1E2540"}`,borderRadius:12,color:iss.priority===pk?PRIORITY_CONFIG[pk].color:"#6B7290",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>{PRIORITY_CONFIG[pk].label}</button>)}
+              </div>
+              <div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>Logged {new Date(iss.createdAt).toLocaleDateString()}</div>
+            </div>
+            <div style={{display:"flex",gap:6,flexShrink:0}}>
+              <button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12,borderColor:"rgba(74,222,128,.25)",color:"#4ADE80"}} onClick={()=>onFix(iss)}>Mark Fixed</button>
+              <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button>
+            </div>
           </div>
         </div>
-      ))}</div>}
+      );})}
+      </div>}
       {fixed.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Fixed ({fixed.length})</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{fixed.map(iss=>(<div key={iss.id} className="q-ms-row" style={{opacity:.55}}><span style={{width:8,height:8,borderRadius:"50%",background:"#4ADE80",flexShrink:0,marginTop:5}}/><div style={{flex:1}}><span style={{color:"#E8EAF6",fontSize:13,fontWeight:500,textDecoration:"line-through"}}>{iss.title}</span>{iss.fixDescription&&<p style={{color:"#6B7290",fontSize:12,marginTop:2}}>{iss.fixDescription}</p>}<div style={{...s.mono10,marginTop:3,color:"#2E3558"}}>{iss.fixedAt?new Date(iss.fixedAt).toLocaleDateString():""}</div></div><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button></div>))}</div></>}
     </div>
   );
@@ -890,6 +1455,133 @@ function ConceptCard({concept,onDelete,onLightbox}){
   );
 }
 
+// ── Build Log Tab ─────────────────────────────────────────────────────────────
+function BuildLogTab({project,onAdd,onUpdateStatus,onDelete}){
+  const builds=project.buildLogs||[];
+  const verMap=Object.fromEntries((project.versions||[]).map(v=>[v.id,v.version]));
+  return(
+    <div>
+      <div style={s.tabBar}><span style={s.mono12}>{builds.length} builds</span><button className="q-btn-primary" onClick={onAdd}>+ Log Build</button></div>
+      {builds.length===0?<div style={s.empty}><p>No builds logged yet.</p></div>:(
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {builds.map(b=>{const bs=BUILD_STATUSES[b.status]||BUILD_STATUSES.building;return(
+            <div key={b.id} className="q-ver-card">
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <span style={{fontFamily:"'JetBrains Mono'",fontSize:13,fontWeight:700,color:"#C0C6E0",textTransform:"capitalize"}}>{b.platform}</span>
+                  {b.buildNumber&&<span style={{...s.badge,color:"#00D4FF",background:"rgba(0,212,255,.1)",fontSize:10}}>#{b.buildNumber}</span>}
+                  {b.buildSize&&<span style={s.mono10}>{b.buildSize}</span>}
+                  {verMap[b.versionId]&&<span style={s.mono10}>→ {verMap[b.versionId]}</span>}
+                </div>
+                <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this build log?"))onDelete(b.id);}}>✕</button>
+              </div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:b.notes?10:0}}>
+                {Object.entries(BUILD_STATUSES).map(([k,v])=>(
+                  <button key={k} onClick={()=>onUpdateStatus(b.id,k)} style={{fontSize:11,padding:"3px 10px",background:b.status===k?v.color+"22":"transparent",border:`1px solid ${b.status===k?v.color:"#1E2540"}`,borderRadius:12,color:b.status===k?v.color:"#6B7290",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>
+                    {v.icon} {v.label}
+                  </button>
+                ))}
+              </div>
+              {b.notes&&<p style={{color:"#8B8FA8",fontSize:13,lineHeight:1.6,marginTop:8}}>{b.notes}</p>}
+              <div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>{new Date(b.builtAt).toLocaleString()}</div>
+            </div>
+          );})}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Environments Tab ──────────────────────────────────────────────────────────
+function EnvironmentsTab({project,onAdd,onEdit,onDelete}){
+  const envs=project.environments||[];
+  const [revealed,setRevealed]=useState({});
+  const toggle=(eid,key)=>setRevealed(r=>({...r,[`${eid}-${key}`]:!r[`${eid}-${key}`]}));
+  return(
+    <div>
+      <div style={s.tabBar}><span style={s.mono12}>{envs.length} {envs.length===1?"environment":"environments"}</span><button className="q-btn-primary" onClick={onAdd}>+ Add Environment</button></div>
+      {envs.length===0?<div style={s.empty}><p>No environments yet. Add dev, staging, production…</p></div>:(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {envs.map(env=>(
+            <div key={env.id} className="q-ver-card" style={{borderLeft:`3px solid ${env.color||"#8B8FA8"}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                <div>
+                  <span style={{fontFamily:"'Syne'",fontSize:16,fontWeight:700,color:"#E8EAF6"}}>{env.name}</span>
+                  {env.url&&<a href={env.url} target="_blank" rel="noreferrer" style={{...s.fileLink,marginLeft:10,fontSize:11}}>↗ {env.url.replace(/https?:\/\//,"")}</a>}
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit(env)}>Edit</button>
+                  <button className="q-del" onClick={async()=>{if(await qConfirm(`Delete ${env.name} environment?`))onDelete(env.id);}}>✕</button>
+                </div>
+              </div>
+              {env.notes&&<p style={{color:"#8B8FA8",fontSize:13,marginBottom:10}}>{env.notes}</p>}
+              {env.variables?.length>0&&(
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:4}}>Variables ({env.variables.length})</div>
+                  {env.variables.map((v,i)=>(
+                    <div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"5px 10px",background:"#0D1120",borderRadius:6}}>
+                      <span style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#00D4FF",minWidth:100,flexShrink:0}}>{v.key}</span>
+                      <span style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#B8BDD4",flex:1,wordBreak:"break-all"}}>
+                        {v.masked&&!revealed[`${env.id}-${i}`] ? "••••••••••••" : v.value}
+                      </span>
+                      {v.masked&&<button onClick={()=>toggle(env.id,i)} style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",background:"none",border:"none",cursor:"pointer"}}>{revealed[`${env.id}-${i}`]?"hide":"show"}</button>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Dependencies Tab ──────────────────────────────────────────────────────────
+function DependenciesTab({project,onAdd,onUpdateStatus,onDelete}){
+  const deps=project.dependencies||[];
+  const grouped=DEP_TYPES.reduce((acc,t)=>{const items=deps.filter(d=>d.type===t);if(items.length)acc[t]=items;return acc;},{});
+  const outdatedCount=deps.filter(d=>d.status!=="ok").length;
+  return(
+    <div>
+      <div style={s.tabBar}>
+        <span style={s.mono12}>{deps.length} dependencies{outdatedCount>0&&<span style={{color:"#FFB347",marginLeft:8}}>· {outdatedCount} need attention</span>}</span>
+        <button className="q-btn-primary" onClick={onAdd}>+ Add Dependency</button>
+      </div>
+      {deps.length===0?<div style={s.empty}><p>No dependencies tracked yet.</p></div>:(
+        <div style={{display:"flex",flexDirection:"column",gap:20}}>
+          {Object.entries(grouped).map(([type,items])=>(
+            <div key={type}>
+              <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>{type}</div>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                {items.map(dep=>{const ds=DEP_STATUSES[dep.status]||DEP_STATUSES.ok;return(
+                  <div key={dep.id} className="q-ms-row" style={{padding:"10px 12px"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                        <span style={{color:"#E8EAF6",fontWeight:600,fontSize:14,fontFamily:"'JetBrains Mono'"}}>{dep.name}</span>
+                        {dep.currentVersion&&<span style={{...s.mono10,color:"#6B7290"}}>{dep.currentVersion}</span>}
+                        {dep.latestVersion&&dep.latestVersion!==dep.currentVersion&&<span style={{...s.mono10,color:"#FFB347"}}>→ {dep.latestVersion}</span>}
+                        <span style={{fontSize:10,fontWeight:700,color:ds.color,background:`${ds.color}18`,border:`1px solid ${ds.color}30`,padding:"2px 7px",borderRadius:12,fontFamily:"'Syne'"}}>{ds.icon} {ds.label}</span>
+                      </div>
+                      {dep.notes&&<p style={{color:"#8B8FA8",fontSize:12,marginTop:3}}>{dep.notes}</p>}
+                    </div>
+                    <div style={{display:"flex",gap:5,flexShrink:0}}>
+                      {Object.entries(DEP_STATUSES).map(([k,v])=>(
+                        <button key={k} onClick={()=>onUpdateStatus(dep.id,k)} title={v.label} style={{fontSize:14,padding:"2px 4px",opacity:dep.status===k?1:.3,transition:"opacity .15s",background:"none",border:"none",cursor:"pointer",color:v.color}}>{v.icon}</button>
+                      ))}
+                      <button className="q-del" onClick={async()=>{if(await qConfirm(`Remove ${dep.name}?`))onDelete(dep.id);}}>✕</button>
+                    </div>
+                  </div>
+                );})}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── DraggableList ─────────────────────────────────────────────────────────────
 function DraggableList({items,onReorder,children}){
   const [list,setList]=useState(items);const[dragIdx,setDragIdx]=useState(null);
@@ -901,27 +1593,62 @@ function DraggableList({items,onReorder,children}){
 }
 
 // ── Settings Modal ────────────────────────────────────────────────────────────
-function SettingsModal({tabOrder,onSave,onCancel}){
+function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,templates,onDeleteTemplate,onOpenTemplates}){
   const [order,setOrder]=useState(tabOrder);const[dragIdx,setDragIdx]=useState(null);
+  const [newTagName,setNewTagName]=useState("");const[newTagColor,setNewTagColor]=useState("#00D4FF");
+  const TAG_PRESET_COLORS=["#00D4FF","#4ADE80","#FFB347","#FF6B9D","#B47FFF","#FF4466","#8B8FA8","#6EB8D0"];
   const onDragStart=i=>setDragIdx(i);
   const onDragOver=(e,i)=>{e.preventDefault();if(dragIdx===null||dragIdx===i)return;const n=[...order];const[m]=n.splice(dragIdx,1);n.splice(i,0,m);setOrder(n);setDragIdx(i);};
   const onDrop=()=>setDragIdx(null);
+  const handleAddTag=async()=>{const name=newTagName.trim();if(!name)return;await onAddTag(name,newTagColor);setNewTagName("");};
   return(
     <div>
       <h2 style={s.modalTitle}>Settings</h2>
-      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:12}}>Tab Order — drag to rearrange</div>
-      <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:14}}>
+
+      {/* Tab order */}
+      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Tab Order — drag to rearrange</div>
+      <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:20}}>
         {order.map((tab,i)=>(
           <div key={tab.key} draggable onDragStart={()=>onDragStart(i)} onDragOver={e=>onDragOver(e,i)} onDrop={onDrop} onDragEnd={onDrop}
-            style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",background:dragIdx===i?"rgba(0,212,255,.04)":"#0D1120",border:"1px solid #1E2540",borderRadius:8,cursor:"grab",opacity:dragIdx===i?.4:1}}>
+            style={{display:"flex",alignItems:"center",gap:12,padding:"9px 14px",background:dragIdx===i?"rgba(0,212,255,.04)":"#0D1120",border:"1px solid #1E2540",borderRadius:8,cursor:"grab",opacity:dragIdx===i?.4:1}}>
             <span style={{color:"#3A4060",fontSize:16,userSelect:"none"}}>⠿</span>
             <span style={{color:"#C0C6E0",fontFamily:"'Syne'",fontWeight:600,fontSize:14,flex:1}}>{tab.label}</span>
             <span style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268"}}>{tab.key}</span>
           </div>
         ))}
       </div>
+
+      {/* Tag management */}
+      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Tags</div>
+      <div style={{display:"flex",gap:8,marginBottom:10}}>
+        <input className="q-input" style={{flex:1,marginTop:0}} value={newTagName} onChange={e=>setNewTagName(e.target.value)} placeholder="New tag name…" onKeyDown={e=>e.key==="Enter"&&handleAddTag()}/>
+        <input type="color" value={newTagColor} onChange={e=>setNewTagColor(e.target.value)} style={{width:42,height:40,padding:2,background:"#0D1120",border:"1px solid #1E2540",borderRadius:8,cursor:"pointer",flexShrink:0}}/>
+        <button className="q-btn-primary" style={{padding:"0 14px",flexShrink:0}} onClick={handleAddTag}>Add</button>
+      </div>
+      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}}>
+        {TAG_PRESET_COLORS.map(c=><button key={c} onClick={()=>setNewTagColor(c)} style={{width:20,height:20,borderRadius:"50%",background:c,border:newTagColor===c?"2px solid #fff":"2px solid transparent",cursor:"pointer"}}/>)}
+      </div>
+      {(userTags||[]).length>0&&(
+        <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:16,marginTop:10}}>
+          {(userTags||[]).map(t=>(
+            <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",background:"#0D1120",border:"1px solid #1E2540",borderRadius:8}}>
+              <span style={{width:12,height:12,borderRadius:"50%",background:t.color,flexShrink:0}}/>
+              <span style={{color:"#C0C6E0",fontFamily:"'Syne'",fontWeight:600,fontSize:13,flex:1}}>{t.name}</span>
+              <button className="q-del" onClick={async()=>{if(await qConfirm(`Delete tag "${t.name}"?`))onDeleteTag(t.id);}}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Templates */}
+      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Project Templates</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",background:"#0D1120",border:"1px solid #1E2540",borderRadius:8,marginBottom:20}}>
+        <span style={{color:"#C0C6E0",fontSize:13}}>{templates?.length||0} saved {templates?.length===1?"template":"templates"}</span>
+        <button className="q-btn-ghost" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{onCancel();onOpenTemplates&&onOpenTemplates();}}>Manage →</button>
+      </div>
+
       <div style={{padding:"10px 14px",background:"rgba(0,212,255,.04)",borderRadius:8,border:"1px solid rgba(0,212,255,.08)",marginBottom:4}}>
-        <p style={{fontSize:12,color:"#6B7290",lineHeight:1.6}}>Tab order syncs across all your devices via Supabase.<br/>Keyboard shortcuts: <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>Ctrl+← / Ctrl+→</span> cycle tabs · <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>Ctrl+↑↓</span> cycle projects · <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>Ctrl+Enter</span> submit · <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>F5</span> refresh</p>
+        <p style={{fontSize:12,color:"#6B7290",lineHeight:1.6}}>Tab order syncs across devices. Tags can be assigned in Edit Project.<br/>Shortcuts: <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>Ctrl+←/→</span> tabs · <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>Ctrl+↑↓</span> projects · <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>Ctrl+Enter</span> submit · <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>F5</span> refresh</p>
       </div>
       <FormActions onCancel={onCancel} onSubmit={()=>onSave(order)} submitLabel="Save Settings"/>
     </div>
@@ -929,17 +1656,36 @@ function SettingsModal({tabOrder,onSave,onCancel}){
 }
 
 // ── Forms ─────────────────────────────────────────────────────────────────────
-function ProjectForm({data,setData,title,onSubmit,onCancel}){
+function ProjectForm({data,setData,title,userTags,templates,onSubmit,onCancel}){
   const set=(k,v)=>setData(d=>({...d,[k]:v}));
   const tog=t=>set("techStack",(data.techStack||[]).includes(t)?(data.techStack||[]).filter(x=>x!==t):[...(data.techStack||[]),t]);
+  const togTag=id=>set("tagIds",(data.tagIds||[]).includes(id)?(data.tagIds||[]).filter(x=>x!==id):[...(data.tagIds||[]),id]);
   const isElectron=!!window.electronAPI?.selectFolder;
   const browseFolder=async()=>{const p=await window.electronAPI.selectFolder();if(p)set("localFolder",p);};
+
+  const applyTplToForm=(tpl)=>{
+    const td=tpl.templateData||{};
+    setData(d=>({...d,status:td.status||d.status,techStack:td.techStack||d.techStack,gitUrl:td.gitUrl||d.gitUrl,supabaseUrl:td.supabaseUrl||d.supabaseUrl,vercelUrl:td.vercelUrl||d.vercelUrl,_templateId:tpl.id}));
+  };
+
   return(
     <div>
       <h2 style={s.modalTitle}>{title}</h2>
+
+      {/* Template selector — only in New Project */}
+      {title==="New Project"&&templates?.length>0&&(
+        <div style={{marginBottom:16,padding:"12px 14px",background:"rgba(0,212,255,.04)",border:"1px solid rgba(0,212,255,.12)",borderRadius:8}}>
+          <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#00D4FF",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Start from Template</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {templates.map(t=><button key={t.id} className={`q-chip${data._templateId===t.id?" q-chip-on":""}`} onClick={()=>applyTplToForm(t)} style={{fontSize:12}}>{t.name}</button>)}
+          </div>
+        </div>
+      )}
+
       <Field label="Project Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., CarKeep"/></Field>
       <Field label="Description"><textarea className="q-input" style={{height:72,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="What does this project do?"/></Field>
       <Field label="Status"><select className="q-input" value={data.status||"planning"} onChange={e=>set("status",e.target.value)}>{Object.entries(STATUS_CONFIG).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></Field>
+      {userTags?.length>0&&<Field label="Tags"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{userTags.map(t=>{const on=(data.tagIds||[]).includes(t.id);return<button key={t.id} onClick={()=>togTag(t.id)} style={{fontSize:12,padding:"4px 11px",borderRadius:12,background:on?`${t.color}20`:"#111627",border:`1px solid ${on?t.color:"#1E2540"}`,color:on?t.color:"#6B7290",cursor:"pointer",fontFamily:"'Syne'",fontWeight:600,transition:"all .15s"}}>{t.name}</button>;})} </div></Field>}
       <Field label="Git Repository URL"><input className="q-input" value={data.gitUrl||""} onChange={e=>set("gitUrl",e.target.value)} placeholder="https://github.com/…"/></Field>
       <Field label="Supabase Project URL"><input className="q-input" value={data.supabaseUrl||""} onChange={e=>set("supabaseUrl",e.target.value)} placeholder="https://supabase.com/dashboard/project/…"/></Field>
       <Field label="Vercel Project URL"><input className="q-input" value={data.vercelUrl||""} onChange={e=>set("vercelUrl",e.target.value)} placeholder="https://vercel.com/…"/></Field>
@@ -962,7 +1708,22 @@ function VersionForm({data,setData,onSubmit,onCancel}){
 function MilestoneForm({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Add Milestone</h2><Field label="Title *"><input className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., Submit to Play Store"/></Field><Field label="Target Date"><input type="date" className="q-input" value={data.date||""} onChange={e=>set("date",e.target.value)}/></Field><Field label="Description"><textarea className="q-input" style={{height:72,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="Optional…"/></Field><FormActions onCancel={onCancel} onSubmit={()=>data.title?.trim()&&onSubmit(data)} submitLabel="Add Milestone"/></div>);}
 function NoteForm({data,setData,title,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>{title}</h2><Field label="Content *"><textarea className="q-input" style={{height:160,resize:"vertical"}} autoFocus value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Write your note…"/></Field><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Save Note"/></div>);}
 function AssetForm({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Add Asset Link</h2><Field label="Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., Play Store Icon"/></Field><Field label="URL *"><input className="q-input" value={data.url||""} onChange={e=>set("url",e.target.value)} placeholder="https://…"/></Field><Field label="Type"><select className="q-input" value={data.type||"Link"} onChange={e=>set("type",e.target.value)}>{ASSET_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></Field><FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&data.url?.trim()&&onSubmit(data)} submitLabel="Add Asset"/></div>);}
-function IssueForm({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Log Issue</h2><Field label="Title *"><input className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., App crashes on login"/></Field><Field label="Description"><textarea className="q-input" style={{height:100,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="Steps to reproduce…"/></Field><FormActions onCancel={onCancel} onSubmit={()=>data.title?.trim()&&onSubmit(data)} submitLabel="Log Issue"/></div>);}
+function IssueForm({data,setData,onSubmit,onCancel}){
+  const set=(k,v)=>setData(d=>({...d,[k]:v}));
+  return(
+    <div>
+      <h2 style={s.modalTitle}>Log Issue</h2>
+      <Field label="Title *"><input className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., App crashes on login"/></Field>
+      <Field label="Priority">
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+          {PRIORITY_KEYS.map(k=>{const pc=PRIORITY_CONFIG[k];return<button key={k} className={`q-chip${(data.priority||"medium")===k?" q-chip-on":""}`} onClick={()=>set("priority",k)} style={{borderColor:(data.priority||"medium")===k?pc.color:undefined,color:(data.priority||"medium")===k?pc.color:undefined}}>{pc.icon} {pc.label}</button>;})}
+        </div>
+      </Field>
+      <Field label="Description"><textarea className="q-input" style={{height:100,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="Steps to reproduce…"/></Field>
+      <FormActions onCancel={onCancel} onSubmit={()=>data.title?.trim()&&onSubmit(data)} submitLabel="Log Issue"/>
+    </div>
+  );
+}
 function FixIssueModal({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Mark Issue Fixed</h2><div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.15)",borderRadius:8,padding:"10px 14px",marginBottom:16}}><p style={{color:"#4ADE80",fontSize:13,fontWeight:600}}>{data.title}</p>{data.description&&<p style={{color:"#8B8FA8",fontSize:12,marginTop:4}}>{data.description}</p>}</div><Field label="How was it fixed? *"><textarea className="q-input" style={{height:120,resize:"vertical"}} autoFocus value={data.fixDescription||""} onChange={e=>set("fixDescription",e.target.value)} placeholder="Describe the fix…"/></Field><p style={{fontSize:12,color:"#6B7290",marginTop:6}}>A note will be automatically created with this fix.</p><FormActions onCancel={onCancel} onSubmit={()=>data.fixDescription?.trim()&&onSubmit(data)} submitLabel="Mark Fixed"/></div>);}
 function IdeaForm({data,setData,title,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>{title}</h2><Field label="Idea *"><textarea className="q-input" style={{height:140,resize:"vertical"}} autoFocus value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Your idea…"/></Field><p style={{fontSize:12,color:"#6B7290",marginTop:4}}>Ideas don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Save Idea"/></div>);}
 function ConceptForm({data,setData,cfg,session,projectId,onSubmit,onUploadFile,onCancel}){
@@ -981,6 +1742,255 @@ function ConceptForm({data,setData,cfg,session,projectId,onSubmit,onUploadFile,o
     default:     return<textarea className="q-input" style={{height:100,resize:"vertical"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Enter text…"/>;
   }};
   return(<div><h2 style={s.modalTitle}>Add Concept</h2><Field label="Type"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{CONCEPT_TYPES.map(t=><button key={t} className={`q-chip${data.type===t?" q-chip-on":""}`} onClick={()=>set("type",t)}>{CONCEPT_ICONS[t]} {t}</button>)}</div></Field><Field label="Label (optional)"><input className="q-input" value={data.label||""} onChange={e=>set("label",e.target.value)} placeholder="Name this concept…"/></Field><Field label="Content">{renderInput()}</Field><p style={{fontSize:12,color:"#6B7290",marginTop:4}}>Concepts don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Add Concept"/></div>);
+}
+
+function BuildLogForm({data,setData,versions,onSubmit,onCancel}){
+  const set=(k,v)=>setData(d=>({...d,[k]:v}));
+  const today=new Date().toISOString();
+  return(
+    <div>
+      <h2 style={s.modalTitle}>Log Build</h2>
+      <Field label="Platform">
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+          {BUILD_PLATFORMS.map(p=><button key={p} className={`q-chip${data.platform===p?" q-chip-on":""}`} onClick={()=>set("platform",p)} style={{textTransform:"capitalize"}}>{p}</button>)}
+        </div>
+      </Field>
+      <Field label="Linked Version">
+        <select className="q-input" value={data.versionId||""} onChange={e=>set("versionId",e.target.value)}>
+          <option value="">— None —</option>
+          {versions.map(v=><option key={v.id} value={v.id}>{v.version}</option>)}
+        </select>
+      </Field>
+      <Field label="Build Number"><input className="q-input q-mono" value={data.buildNumber||""} onChange={e=>set("buildNumber",e.target.value)} placeholder="e.g. 42"/></Field>
+      <Field label="Build Size"><input className="q-input" value={data.buildSize||""} onChange={e=>set("buildSize",e.target.value)} placeholder="e.g. 24.3 MB"/></Field>
+      <Field label="Status">
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+          {Object.entries(BUILD_STATUSES).map(([k,v])=><button key={k} className={`q-chip${data.status===k?" q-chip-on":""}`} onClick={()=>set("status",k)}>{v.icon} {v.label}</button>)}
+        </div>
+      </Field>
+      <Field label="Store / Distribution"><input className="q-input" value={data.store||""} onChange={e=>set("store",e.target.value)} placeholder="e.g. Google Play, App Store, Direct"/></Field>
+      <Field label="Notes"><textarea className="q-input" style={{height:72,resize:"vertical"}} value={data.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional…"/></Field>
+      <FormActions onCancel={onCancel} onSubmit={()=>onSubmit({...data,builtAt:today})} submitLabel="Log Build"/>
+    </div>
+  );
+}
+
+function EnvironmentForm({data,setData,title,onSubmit,onCancel}){
+  const set=(k,v)=>setData(d=>({...d,[k]:v}));
+  const addVar=()=>setData(d=>({...d,variables:[...(d.variables||[]),{key:"",value:"",masked:false}]}));
+  const setVar=(i,field,val)=>setData(d=>({...d,variables:d.variables.map((v,j)=>j===i?{...v,[field]:val}:v)}));
+  const rmVar=i=>setData(d=>({...d,variables:d.variables.filter((_,j)=>j!==i)}));
+  return(
+    <div>
+      <h2 style={s.modalTitle}>{title}</h2>
+      <Field label="Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g. Production"/></Field>
+      <Field label="URL"><input className="q-input" value={data.url||""} onChange={e=>set("url",e.target.value)} placeholder="https://…"/></Field>
+      <Field label="Color">
+        <div style={{display:"flex",gap:8,marginTop:8,alignItems:"center"}}>
+          <input type="color" value={data.color||"#4ADE80"} onChange={e=>set("color",e.target.value)} style={{width:40,height:36,padding:2,background:"#0D1120",border:"1px solid #1E2540",borderRadius:6,cursor:"pointer"}}/>
+          {ENV_PRESET_COLORS.map(c=><button key={c} onClick={()=>set("color",c)} style={{width:22,height:22,borderRadius:"50%",background:c,border:data.color===c?"2px solid #fff":"2px solid transparent",cursor:"pointer"}}/>)}
+        </div>
+      </Field>
+      <Field label="Notes"><textarea className="q-input" style={{height:60,resize:"vertical"}} value={data.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional…"/></Field>
+      <Field label="Environment Variables">
+        <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:8}}>
+          {(data.variables||[]).map((v,i)=>(
+            <div key={i} style={{display:"flex",gap:6,alignItems:"center"}}>
+              <input className="q-input q-mono" style={{flex:1,marginTop:0}} value={v.key} onChange={e=>setVar(i,"key",e.target.value)} placeholder="KEY"/>
+              <input className="q-input" style={{flex:2,marginTop:0,fontFamily:v.masked?"monospace":"inherit"}} value={v.value} onChange={e=>setVar(i,"value",e.target.value)} placeholder="value" type={v.masked?"password":"text"}/>
+              <button onClick={()=>setVar(i,"masked",!v.masked)} title="Mask value" style={{padding:"0 8px",color:v.masked?"#00D4FF":"#4B5268",fontFamily:"'JetBrains Mono'",fontSize:12,background:"none",border:"none",cursor:"pointer"}}>🔒</button>
+              <button className="q-del" onClick={()=>rmVar(i)}>✕</button>
+            </div>
+          ))}
+          <button className="q-btn-ghost" style={{fontSize:12,marginTop:4}} onClick={addVar}>+ Add Variable</button>
+        </div>
+      </Field>
+      <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&onSubmit(data)} submitLabel={title.includes("Edit")?"Save Changes":"Add Environment"}/>
+    </div>
+  );
+}
+
+function DependencyForm({data,setData,onSubmit,onCancel}){
+  const set=(k,v)=>setData(d=>({...d,[k]:v}));
+  return(
+    <div>
+      <h2 style={s.modalTitle}>Add Dependency</h2>
+      <Field label="Package Name *"><input className="q-input q-mono" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g. react-native, supabase-js"/></Field>
+      <Field label="Type">
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+          {DEP_TYPES.map(t=><button key={t} className={`q-chip${data.type===t?" q-chip-on":""}`} onClick={()=>set("type",t)}>{t}</button>)}
+        </div>
+      </Field>
+      <Field label="Current Version"><input className="q-input q-mono" value={data.currentVersion||""} onChange={e=>set("currentVersion",e.target.value)} placeholder="e.g. 2.3.1"/></Field>
+      <Field label="Latest Version"><input className="q-input q-mono" value={data.latestVersion||""} onChange={e=>set("latestVersion",e.target.value)} placeholder="Leave blank if unknown"/></Field>
+      <Field label="Status">
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+          {Object.entries(DEP_STATUSES).map(([k,v])=><button key={k} className={`q-chip${data.status===k?" q-chip-on":""}`} onClick={()=>set("status",k)}>{v.icon} {v.label}</button>)}
+        </div>
+      </Field>
+      <Field label="Notes"><textarea className="q-input" style={{height:60,resize:"vertical"}} value={data.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional notes…"/></Field>
+      <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&onSubmit(data)} submitLabel="Add Dependency"/>
+    </div>
+  );
+}
+
+// ── GitHub Tab ────────────────────────────────────────────────────────────────
+function GitHubTab({project,data,onRefresh,onLoadCache}){
+  useEffect(()=>{onLoadCache&&onLoadCache();},[]);
+  const repo=parseGitHubRepo(project.gitUrl);
+  if(!repo){
+    return(
+      <div style={s.empty}>
+        <p>No GitHub repository linked.</p>
+        <p style={{fontSize:13,color:"#4B5268",marginTop:4}}>Add a GitHub URL in Edit Project to enable this tab.</p>
+      </div>
+    );
+  }
+  const ghUrl=`https://github.com/${repo.owner}/${repo.repo}`;
+  return(
+    <div>
+      <div style={s.tabBar}>
+        <div>
+          <a href={ghUrl} target="_blank" rel="noreferrer" style={{...s.fileLink,fontSize:13}}>{repo.owner}/{repo.repo}</a>
+          {data?.fetchedAt&&<span style={{...s.mono10,marginLeft:10,color:"#4B5268"}}>Updated {new Date(data.fetchedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span>}
+        </div>
+        <button className="q-btn-primary" onClick={onRefresh}>⟳ Refresh</button>
+      </div>
+
+      {!data&&(
+        <div style={s.empty}><p>Click Refresh to load GitHub data.</p><p style={{...s.mono10,marginTop:6,color:"#4B5268"}}>Public repos: 60 req/hr · Private: add GitHub token in Settings</p></div>
+      )}
+
+      {data?.error&&<div style={{padding:"10px 14px",background:"rgba(255,100,100,.08)",border:"1px solid rgba(255,100,100,.2)",borderRadius:8,color:"#FF7090",fontSize:13,marginBottom:16}}>{data.error}</div>}
+
+      {data&&<>
+        {/* Commits */}
+        {data.commits?.length>0&&(
+          <div style={{marginBottom:24}}>
+            <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Recent Commits ({data.commits.length})</div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {data.commits.map(c=>(
+                <div key={c.sha} style={{display:"flex",gap:10,padding:"9px 12px",background:"#111627",border:"1px solid #1A2040",borderRadius:8,alignItems:"flex-start"}}>
+                  <a href={c.url} target="_blank" rel="noreferrer" style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"#00D4FF",flexShrink:0,marginTop:2,minWidth:50}}>{c.sha}</a>
+                  <div style={{flex:1,minWidth:0}}>
+                    <p style={{color:"#C0C6E0",fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.message}</p>
+                    <p style={{...s.mono10,color:"#4B5268",marginTop:2}}>{c.author} · {c.date?new Date(c.date).toLocaleDateString():""}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Open Issues */}
+        {data.issues?.length>0&&(
+          <div style={{marginBottom:24}}>
+            <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#FF6B9D",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Open Issues ({data.issues.length})</div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {data.issues.map(i=>(
+                <div key={i.id} style={{display:"flex",gap:10,padding:"9px 12px",background:"#111627",border:"1px solid #1A2040",borderRadius:8,alignItems:"center"}}>
+                  <span style={{...s.mono10,color:"#4B5268",flexShrink:0}}>#{i.id}</span>
+                  <a href={i.url} target="_blank" rel="noreferrer" style={{color:"#C0C6E0",fontSize:13,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:"none"}}>{i.title}</a>
+                  <div style={{display:"flex",gap:4,flexShrink:0}}>{i.labels?.slice(0,2).map(l=><span key={l} style={{fontSize:10,padding:"2px 6px",borderRadius:8,background:"rgba(0,212,255,.08)",color:"#6EB8D0",fontFamily:"'JetBrains Mono'"}}>{l}</span>)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Open PRs */}
+        {data.prs?.length>0&&(
+          <div>
+            <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4ADE80",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Open Pull Requests ({data.prs.length})</div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {data.prs.map(pr=>(
+                <div key={pr.id} style={{display:"flex",gap:10,padding:"9px 12px",background:"#111627",border:"1px solid #1A2040",borderRadius:8,alignItems:"center"}}>
+                  <span style={{...s.mono10,color:"#4B5268",flexShrink:0}}>#{pr.id}</span>
+                  {pr.draft&&<span style={{fontSize:10,padding:"2px 6px",borderRadius:6,background:"rgba(139,143,168,.12)",color:"#8B8FA8",flexShrink:0}}>Draft</span>}
+                  <a href={pr.url} target="_blank" rel="noreferrer" style={{color:"#C0C6E0",fontSize:13,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:"none"}}>{pr.title}</a>
+                  {pr.base&&<span style={{...s.mono10,color:"#4B5268",flexShrink:0}}>→ {pr.base}</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {data.commits?.length===0&&data.issues?.length===0&&data.prs?.length===0&&(
+          <div style={s.empty}><p>No data found. The repo may be empty or private.</p></div>
+        )}
+      </>}
+    </div>
+  );
+}
+
+// ── Save Template Modal ────────────────────────────────────────────────────────
+function SaveTemplateModal({data,setData,onSubmit,onCancel}){
+  const set=(k,v)=>setData(d=>({...d,[k]:v}));
+  return(
+    <div>
+      <h2 style={s.modalTitle}>Save as Template</h2>
+      <p style={{color:"#8B8FA8",fontSize:13,marginBottom:16,lineHeight:1.6}}>Saves this project's status, tech stack, links, milestones, open todos, and environments as a reusable template. Masked environment variables are excluded.</p>
+      <Field label="Template Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., React Native App Starter" autoFocus/></Field>
+      <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&onSubmit(data)} submitLabel="Save Template"/>
+    </div>
+  );
+}
+
+// ── Manage Templates Modal ────────────────────────────────────────────────────
+function ManageTemplatesModal({templates,onDelete,onApply,onCancel}){
+  return(
+    <div>
+      <h2 style={s.modalTitle}>Project Templates</h2>
+      {(!templates||templates.length===0)?(
+        <div style={s.empty}><p>No templates yet.</p><p style={{fontSize:13,color:"#4B5268",marginTop:4}}>Save a project as a template using the 💾 Template button.</p></div>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+          {templates.map(t=>(
+            <div key={t.id} style={{display:"flex",gap:12,padding:"13px 16px",background:"#0D1120",border:"1px solid #1E2540",borderRadius:10,alignItems:"center"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{color:"#E8EAF6",fontWeight:600,fontSize:14}}>{t.name}</div>
+                {t.description&&<div style={{color:"#8B8FA8",fontSize:12,marginTop:2}}>{t.description}</div>}
+                <div style={{...s.mono10,color:"#4B5268",marginTop:4}}>
+                  {t.templateData?.milestones?.length||0} milestones · {t.templateData?.todos?.length||0} todos · {t.templateData?.techStack?.length||0} stack items
+                </div>
+              </div>
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <button className="q-btn-ghost" style={{padding:"6px 12px",fontSize:12}} onClick={()=>onApply(t.id)}>Apply</button>
+                <button className="q-del" onClick={async()=>{if(await qConfirm(`Delete template "${t.name}"?`))onDelete(t.id);}}>✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <button className="q-btn-ghost" style={{width:"100%"}} onClick={onCancel}>Close</button>
+    </div>
+  );
+}
+
+// ── Changelog Modal ───────────────────────────────────────────────────────────
+function ChangelogModal({project,onClose}){
+  const [copied,setCopied]=useState(false);
+  const md=generateChangelog(project);
+  const copy=()=>{
+    navigator.clipboard.writeText(md).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2000);}).catch(()=>{});
+  };
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <h2 style={s.modalTitle}>📋 Changelog</h2>
+        <div style={{display:"flex",gap:8}}>
+          <button className="q-btn-ghost" style={{padding:"7px 14px",fontSize:12}} onClick={copy}>{copied?"✓ Copied!":"Copy Markdown"}</button>
+          <button className="q-btn-ghost" style={{padding:"7px 12px",fontSize:12}} onClick={onClose}>✕</button>
+        </div>
+      </div>
+      <div style={{background:"#0A0E1A",border:"1px solid #1A2040",borderRadius:10,padding:18,maxHeight:"60vh",overflowY:"auto"}}>
+        <pre style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#B8BDD4",whiteSpace:"pre-wrap",lineHeight:1.7,margin:0}}>{md}</pre>
+      </div>
+      <p style={{...s.mono10,color:"#4B5268",marginTop:10}}>
+        {project.versions?.length||0} versions · {project.issues?.filter(i=>i.status==="fixed").length||0} fixed issues included
+      </p>
+    </div>
+  );
 }
 
 function Field({label,children}){return<div style={{marginBottom:14}}><label style={s.fieldLbl}>{label}</label>{children}</div>;}
