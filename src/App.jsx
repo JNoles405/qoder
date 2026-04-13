@@ -14,7 +14,7 @@ function useIsMobile() {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.3.2";
+const APP_VER    = "v0.5.0";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -61,12 +61,72 @@ const BUILD_STATUSES  = {
 };
 
 const ENV_PRESET_COLORS = ["#4ADE80","#00D4FF","#FFB347","#FF6B9D","#B47FFF","#8B8FA8"];
+const PROJECT_COLORS    = ["","#00D4FF","#4ADE80","#FFB347","#FF6B9D","#B47FFF","#FF4466","#6EB8D0","#F97316","#A78BFA","#34D399","#FB923C"];
+
+// ── Theme palette ─────────────────────────────────────────────────────────────
+const THEMES = {
+  dark: {
+    bg:       "#0A0E1A", bgSide:   "#0C1020", bgCard:   "#111627",
+    bgInput:  "#0D1120", bgModal:  "#111627",
+    border:   "#1A2040", borderMd: "#1E2540", borderLg: "#151C32",
+    txt:      "#E8EAF6", txtSub:   "#8B8FA8", txtMuted: "#6B7290",
+    txtFaint: "#4B5268", txtDim:   "#2E3558", txtGhost: "#2A304A",
+  },
+  light: {
+    bg:       "#F4F6FB", bgSide:   "#FFFFFF", bgCard:   "#FFFFFF",
+    bgInput:  "#F8FAFF", bgModal:  "#FFFFFF",
+    border:   "#DDE3F0", borderMd: "#C8D0E8", borderLg: "#E4E9F4",
+    txt:      "#111827", txtSub:   "#4B5563", txtMuted: "#6B7280",
+    txtFaint: "#9CA3AF", txtDim:   "#D1D5DB", txtGhost: "#9CA3AF",
+  },
+};
+
+function buildThemeCSS(themeName, accent="#00D4FF"){
+  const t=THEMES[themeName]||THEMES.dark;
+  // Map old hardcoded hex values → CSS vars
+  return `
+:root {
+  --bg:${t.bg}; --bg-side:${t.bgSide}; --bg-card:${t.bgCard};
+  --bg-input:${t.bgInput}; --bg-modal:${t.bgModal};
+  --border:${t.border}; --border-md:${t.borderMd}; --border-lg:${t.borderLg};
+  --txt:${t.txt}; --txt-sub:${t.txtSub}; --txt-muted:${t.txtMuted};
+  --txt-faint:${t.txtFaint}; --txt-dim:${t.txtDim}; --txt-ghost:${t.txtGhost};
+  --accent:${accent}; --accent-dim:${accent}1A; --accent-border:${accent}30;
+  --scrollbar:${themeName==="light"?"#C8D0E8":"#1E2540"};
+}
+::-webkit-scrollbar-track{background:var(--bg)!important;}
+::-webkit-scrollbar-thumb{background:var(--scrollbar)!important;}
+`;
+}
+
+const RECURRENCE_TYPES = {
+  daily:       { label:"Daily",       icon:"↺" },
+  weekly:      { label:"Weekly",      icon:"↻" },
+  "per-release":{ label:"Per Release",icon:"⟳" },
+};
+
+function fmtDuration(seconds){
+  if(!seconds||seconds<0)return"0m";
+  const h=Math.floor(seconds/3600);
+  const m=Math.floor((seconds%3600)/60);
+  if(h>0)return`${h}h ${m}m`;
+  return`${m}m`;
+}
+
+function fmtDurationLong(seconds){
+  const h=Math.floor(seconds/3600);
+  const m=Math.floor((seconds%3600)/60);
+  const s=seconds%60;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
 const FEED_META={
-  version:     {icon:"⟳",label:"Version",      color:"#00D4FF"},
-  milestone:   {icon:"◎",label:"Milestone Done",color:"#4ADE80"},
-  todo:        {icon:"✓",label:"Task Done",     color:"#4ADE80"},
-  note:        {icon:"⬝",label:"Note",          color:"#FFB347"},
-  "issue-fixed":{icon:"🐛",label:"Issue Fixed", color:"#B47FFF"},
+  version:      {icon:"⟳",label:"Version",       color:"#00D4FF"},
+  milestone:    {icon:"◎",label:"Milestone Done", color:"#4ADE80"},
+  todo:         {icon:"✓",label:"Task Done",      color:"#4ADE80"},
+  note:         {icon:"⬝",label:"Note",           color:"#FFB347"},
+  "issue-fixed":{icon:"🐛",label:"Issue Fixed",   color:"#B47FFF"},
+  sprint:       {icon:"◈",label:"Sprint Done",    color:"#B47FFF"},
+  time:         {icon:"⏱",label:"Time Logged",    color:"#6B7290"},
 };
 const TIME_PERIODS=[
   {key:"24h",label:"24h",ms:86400000},
@@ -80,6 +140,7 @@ const DEFAULT_TABS=[
   {key:"overview",     label:"Overview"     },
   {key:"versions",     label:"Versions"     },
   {key:"milestones",   label:"Milestones"   },
+  {key:"sprints",      label:"Sprints"      },
   {key:"todos",        label:"To-Do"        },
   {key:"notes",        label:"Notes"        },
   {key:"assets",       label:"Assets"       },
@@ -87,6 +148,7 @@ const DEFAULT_TABS=[
   {key:"build-log",    label:"Build Log"    },
   {key:"environments", label:"Environments" },
   {key:"dependencies", label:"Dependencies" },
+  {key:"time",         label:"Time"         },
   {key:"ideas",        label:"Ideas"        },
   {key:"concepts",     label:"Concepts"     },
   {key:"github",       label:"GitHub"       },
@@ -131,33 +193,39 @@ async function loadProjects(url,key,token,userId){
   const rows=await sb.get(url,key,token,"projects",`?user_id=eq.${userId}&order=position.asc`);
   if(!rows.length)return[];
   const ids=rows.map(p=>p.id).join(",");
-  const [vers,miles,notes,todos,assets,issues,ideas,concepts,builds,envs,deps,ptRows]=await Promise.all([
-    sb.get(url,key,token,"versions",      `?project_id=in.(${ids})&order=date.desc`),
-    sb.get(url,key,token,"milestones",    `?project_id=in.(${ids})&order=created_at.asc`),
-    sb.get(url,key,token,"notes",         `?project_id=in.(${ids})&order=position.asc`),
-    sb.get(url,key,token,"todos",         `?project_id=in.(${ids})&order=position.asc`),
-    sb.get(url,key,token,"assets",        `?project_id=in.(${ids})&order=created_at.asc`),
-    sb.get(url,key,token,"issues",        `?project_id=in.(${ids})&order=created_at.desc`),
-    sb.get(url,key,token,"ideas",         `?project_id=in.(${ids})&order=position.asc`),
-    sb.get(url,key,token,"concepts",      `?project_id=in.(${ids})&order=created_at.desc`),
-    sb.get(url,key,token,"build_logs",    `?project_id=in.(${ids})&order=built_at.desc`),
-    sb.get(url,key,token,"environments",  `?project_id=in.(${ids})&order=position.asc`),
-    sb.get(url,key,token,"dependencies",  `?project_id=in.(${ids})&order=created_at.asc`),
-    sb.get(url,key,token,"project_tags",  `?project_id=in.(${ids})`),
+  const [vers,miles,notes,todos,assets,issues,ideas,concepts,builds,envs,deps,ptRows,sprints,timeSess,iComments]=await Promise.all([
+    sb.get(url,key,token,"versions",       `?project_id=in.(${ids})&order=date.desc`),
+    sb.get(url,key,token,"milestones",     `?project_id=in.(${ids})&order=created_at.asc`),
+    sb.get(url,key,token,"notes",          `?project_id=in.(${ids})&order=position.asc`),
+    sb.get(url,key,token,"todos",          `?project_id=in.(${ids})&order=position.asc`),
+    sb.get(url,key,token,"assets",         `?project_id=in.(${ids})&order=created_at.asc`),
+    sb.get(url,key,token,"issues",         `?project_id=in.(${ids})&order=created_at.desc`),
+    sb.get(url,key,token,"ideas",          `?project_id=in.(${ids})&order=position.asc`),
+    sb.get(url,key,token,"concepts",       `?project_id=in.(${ids})&order=created_at.desc`),
+    sb.get(url,key,token,"build_logs",     `?project_id=in.(${ids})&order=built_at.desc`),
+    sb.get(url,key,token,"environments",   `?project_id=in.(${ids})&order=position.asc`),
+    sb.get(url,key,token,"dependencies",   `?project_id=in.(${ids})&order=created_at.asc`),
+    sb.get(url,key,token,"project_tags",   `?project_id=in.(${ids})`),
+    sb.get(url,key,token,"sprints",        `?project_id=in.(${ids})&order=position.asc`),
+    sb.get(url,key,token,"time_sessions",  `?project_id=in.(${ids})&order=started_at.desc`),
+    sb.get(url,key,token,"issue_comments", `?project_id=in.(${ids})&order=created_at.asc`),
   ]);
   return rows.map(p=>({
     id:p.id,name:p.name,description:p.description,status:p.status,
     techStack:p.tech_stack||[],localFolder:p.local_folder||null,
     gitUrl:p.git_url||"",supabaseUrl:p.supabase_url||"",vercelUrl:p.vercel_url||"",
     isPublic:p.is_public||false,publicSlug:p.public_slug||null,
+    color:p.color||null,
     position:p.position,createdAt:p.created_at,
     tagIds:      ptRows.filter(pt=>pt.project_id===p.id).map(pt=>pt.tag_id),
     versions:    vers.filter(v=>v.project_id===p.id).map(v=>({id:v.id,version:v.version,releaseNotes:v.release_notes,date:v.date,fileLinks:v.file_links||[]})),
     milestones:  miles.filter(m=>m.project_id===p.id).map(m=>({id:m.id,title:m.title,description:m.description,date:m.date,completed:m.completed,completedAt:m.completed_at,createdAt:m.created_at})),
     notes:       notes.filter(n=>n.project_id===p.id).map(n=>({id:n.id,content:n.content,position:n.position,createdAt:n.created_at})),
-    todos:       todos.filter(t=>t.project_id===p.id).map(t=>({id:t.id,text:t.text,completed:t.completed,completedAt:t.completed_at,priority:t.priority||"medium",position:t.position,createdAt:t.created_at})),
+    todos:       todos.filter(t=>t.project_id===p.id).map(t=>({id:t.id,text:t.text,completed:t.completed,completedAt:t.completed_at,priority:t.priority||"medium",recurring:t.recurring||false,recurrenceType:t.recurrence_type||null,sprintId:t.sprint_id||null,position:t.position,createdAt:t.created_at})),
+    sprints:     sprints.filter(sp=>sp.project_id===p.id).map(sp=>({id:sp.id,name:sp.name,goal:sp.goal,startDate:sp.start_date,endDate:sp.end_date,status:sp.status||"active",position:sp.position,createdAt:sp.created_at})),
+    timeSessions:timeSess.filter(ts=>ts.project_id===p.id).map(ts=>({id:ts.id,startedAt:ts.started_at,endedAt:ts.ended_at,durationSeconds:ts.duration_seconds,note:ts.note,createdAt:ts.created_at})),
     assets:      assets.filter(a=>a.project_id===p.id).map(a=>({id:a.id,name:a.name,url:a.url,type:a.type,createdAt:a.created_at})),
-    issues:      issues.filter(i=>i.project_id===p.id).map(i=>({id:i.id,title:i.title,description:i.description,status:i.status,priority:i.priority||"medium",fixDescription:i.fix_description,fixedAt:i.fixed_at,createdAt:i.created_at})),
+    issues:      issues.filter(i=>i.project_id===p.id).map(i=>({id:i.id,title:i.title,description:i.description,status:i.status,priority:i.priority||"medium",screenshotUrls:i.screenshot_urls||[],fixDescription:i.fix_description,fixedAt:i.fixed_at,createdAt:i.created_at,comments:(iComments||[]).filter(c=>c.issue_id===i.id).map(c=>({id:c.id,content:c.content,createdAt:c.created_at}))})),
     ideas:       ideas.filter(d=>d.project_id===p.id).map(d=>({id:d.id,content:d.content,pinned:d.pinned,position:d.position,createdAt:d.created_at})),
     concepts:    concepts.filter(c=>c.project_id===p.id).map(c=>({id:c.id,type:c.type,label:c.label,content:c.content,createdAt:c.created_at})),
     buildLogs:   builds.filter(b=>b.project_id===p.id).map(b=>({id:b.id,versionId:b.version_id,platform:b.platform,buildNumber:b.build_number,buildSize:b.build_size,status:b.status,store:b.store,notes:b.notes,builtAt:b.built_at,createdAt:b.created_at})),
@@ -179,6 +247,8 @@ function buildActivityFeed(projects){
     p.todos?.filter(t=>t.completed&&t.completedAt).forEach(t=>items.push({type:"todo",projectId:p.id,projectName:p.name,date:new Date(t.completedAt),title:t.text,content:null}));
     p.notes?.forEach(n=>items.push({type:"note",projectId:p.id,projectName:p.name,date:new Date(n.createdAt),title:null,content:n.content}));
     p.issues?.filter(i=>i.status==="fixed").forEach(i=>items.push({type:"issue-fixed",projectId:p.id,projectName:p.name,date:new Date(i.fixedAt||i.createdAt),title:i.title,content:i.fixDescription}));
+    p.sprints?.filter(sp=>sp.status==="completed").forEach(sp=>items.push({type:"sprint",projectId:p.id,projectName:p.name,date:new Date(sp.createdAt),title:sp.name,content:sp.goal}));
+    p.timeSessions?.filter(s=>s.durationSeconds).forEach(s=>items.push({type:"time",projectId:p.id,projectName:p.name,date:new Date(s.startedAt),title:fmtDuration(s.durationSeconds),content:s.note}));
   });
   return items.sort((a,b)=>b.date-a.date);
 }
@@ -229,7 +299,82 @@ function generateChangelog(project){
   return md.trim();
 }
 
-// ── GitHub helpers ────────────────────────────────────────────────────────────
+// ── Lightweight markdown renderer ─────────────────────────────────────────────
+// Supports: # headings, **bold**, *italic*, `code`, ```blocks```, - lists, > quotes, ---
+function renderMarkdown(text){
+  if(!text)return null;
+  const lines=text.split("\n");
+  const out=[];let i=0;
+  while(i<lines.length){
+    const l=lines[i];
+    // Fenced code block
+    if(l.startsWith("```")){
+      const lang=l.slice(3).trim();
+      const block=[];i++;
+      while(i<lines.length&&!lines[i].startsWith("```")){block.push(lines[i]);i++;}
+      out.push(<pre key={i} style={{fontFamily:"'JetBrains Mono'",fontSize:12,background:"#0A0E1A",border:"1px solid #1A2040",borderRadius:8,padding:"12px 14px",overflowX:"auto",margin:"10px 0",color:"#B8BDD4",lineHeight:1.7}}><code>{block.join("\n")}</code></pre>);
+      i++;continue;
+    }
+    // HR
+    if(/^---+$/.test(l.trim())){out.push(<hr key={i} style={{border:"none",borderTop:"1px solid #1A2040",margin:"16px 0"}}/>);i++;continue;}
+    // Headings
+    const hm=l.match(/^(#{1,3})\s+(.+)/);
+    if(hm){const sz=[20,17,15][hm[1].length-1];out.push(<div key={i} style={{fontFamily:"'Syne'",fontWeight:700,fontSize:sz,color:"#E8EAF6",margin:`${hm[1].length===1?"18px":"12px"} 0 6px`}}>{inlinesMd(hm[2])}</div>);i++;continue;}
+    // Blockquote
+    if(l.startsWith("> ")){out.push(<div key={i} style={{borderLeft:"3px solid #1E2540",paddingLeft:12,margin:"4px 0",color:"#8B8FA8",fontSize:13,lineHeight:1.6}}>{inlinesMd(l.slice(2))}</div>);i++;continue;}
+    // Unordered list
+    if(/^[-*]\s/.test(l)){out.push(<div key={i} style={{display:"flex",gap:8,margin:"2px 0"}}><span style={{color:"#6B7290",flexShrink:0,marginTop:2}}>•</span><span style={{color:"#B8BDD4",fontSize:14,lineHeight:1.6}}>{inlinesMd(l.slice(2))}</span></div>);i++;continue;}
+    // Numbered list
+    const nm=l.match(/^(\d+)\.\s+(.+)/);
+    if(nm){out.push(<div key={i} style={{display:"flex",gap:8,margin:"2px 0"}}><span style={{color:"#6B7290",flexShrink:0,fontFamily:"'JetBrains Mono'",fontSize:12,marginTop:2}}>{nm[1]}.</span><span style={{color:"#B8BDD4",fontSize:14,lineHeight:1.6}}>{inlinesMd(nm[2])}</span></div>);i++;continue;}
+    // Empty line → spacer
+    if(!l.trim()){out.push(<div key={i} style={{height:8}}/>);i++;continue;}
+    // Normal paragraph
+    out.push(<p key={i} style={{color:"#B8BDD4",fontSize:14,lineHeight:1.75,margin:"2px 0"}}>{inlinesMd(l)}</p>);
+    i++;
+  }
+  return<>{out}</>;
+}
+
+function inlinesMd(text){
+  // Split on inline patterns: **bold**, *italic*, `code`, [link](url)
+  const parts=[];let remaining=text;let key=0;
+  while(remaining){
+    // Bold
+    const bm=remaining.match(/\*\*(.+?)\*\*/);
+    // Italic
+    const im=remaining.match(/\*([^*]+?)\*/);
+    // Code
+    const cm=remaining.match(/`([^`]+?)`/);
+    // Link
+    const lm=remaining.match(/\[(.+?)\]\((.+?)\)/);
+    // Find earliest match
+    const candidates=[bm&&{m:bm,type:"b"},im&&{m:im,type:"i"},cm&&{m:cm,type:"c"},lm&&{m:lm,type:"l"}].filter(Boolean);
+    if(!candidates.length){parts.push(<span key={key++}>{remaining}</span>);break;}
+    const earliest=candidates.reduce((a,b)=>b.m.index<a.m.index?b:a);
+    const {m,type}=earliest;
+    if(m.index>0)parts.push(<span key={key++}>{remaining.slice(0,m.index)}</span>);
+    if(type==="b")parts.push(<strong key={key++} style={{color:"#E8EAF6"}}>{m[1]}</strong>);
+    else if(type==="i")parts.push(<em key={key++} style={{color:"#C0C6E0",fontStyle:"italic"}}>{m[1]}</em>);
+    else if(type==="c")parts.push(<code key={key++} style={{fontFamily:"'JetBrains Mono'",fontSize:12,background:"rgba(0,212,255,.08)",color:"#00D4FF",padding:"1px 5px",borderRadius:4}}>{m[1]}</code>);
+    else if(type==="l")parts.push(<a key={key++} href={m[2]} target="_blank" rel="noreferrer" style={{color:"#00D4FF",textDecoration:"underline"}}>{m[1]}</a>);
+    remaining=remaining.slice(m.index+m[0].length);
+  }
+  return parts.length?parts:text;
+}
+
+// ── GitHub Release publisher ───────────────────────────────────────────────────
+async function publishGitHubRelease(owner,repo,token,tagName,name,body,draft=false){
+  const res=await fetch(`https://api.github.com/repos/${owner}/${repo}/releases`,{
+    method:"POST",
+    headers:{"Authorization":`token ${token}`,"Content-Type":"application/json","Accept":"application/vnd.github+json"},
+    body:JSON.stringify({tag_name:tagName,name,body,draft,generate_release_notes:false}),
+  });
+  const data=await res.json();
+  if(!res.ok)throw new Error(data.message||"GitHub Release failed");
+  return data; // {html_url, ...}
+}
+
 function parseGitHubRepo(gitUrl){
   if(!gitUrl)return null;
   const m=gitUrl.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/|$)/i);
@@ -341,10 +486,23 @@ export default function QoderApp() {
   const [userTags,        setUserTags]        = useState([]);
   const [templates,       setTemplates]       = useState([]);
   const [ghCache,         setGhCache]         = useState({});
+  const [theme,           setTheme]           = useState(()=>{try{return localStorage.getItem("q-theme")||"dark";}catch{return"dark";}});
+  const [accentColor,     setAccentColor]     = useState(()=>{try{return localStorage.getItem("q-accent")||"#00D4FF";}catch{return"#00D4FF";}});
+  const [customStatuses,  setCustomStatuses]  = useState({});
   const isMobile = useIsMobile();
   const projRef  = useRef(projects);
   const sidebarDragRef = useRef(null);
   projRef.current = projects;
+
+  const saveTheme=(t)=>{setTheme(t);try{localStorage.setItem("q-theme",t);}catch{}};
+  const saveAccent=(c)=>{setAccentColor(c);try{localStorage.setItem("q-accent",c);}catch{}};
+  const applyCustomStatus=(key,label)=>setCustomStatuses(prev=>({...prev,[key]:label}));
+  const resetCustomStatus=(key)=>setCustomStatuses(prev=>{const n={...prev};delete n[key];return n;});
+
+  // Merge custom labels into STATUS_CONFIG at runtime
+  const effectiveStatuses=Object.fromEntries(
+    Object.entries(STATUS_CONFIG).map(([k,v])=>([k,{...v,label:customStatuses[k]||v.label}]))
+  );
 
   const showToast = (msg,type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
 
@@ -409,14 +567,12 @@ export default function QoderApp() {
               const trows=await sb.get(saved.url,saved.key,res.access_token,"project_templates",`?user_id=eq.${res.user.id}&order=created_at.desc`);
               setTemplates(trows.map(r=>({id:r.id,name:r.name,description:r.description,templateData:r.template_data,createdAt:r.created_at})));
             }catch{}
-            // Load synced tab order
             try{
               const sett=await sb.get(saved.url,saved.key,res.access_token,"user_settings",`?user_id=eq.${res.user.id}`);
-              if(sett?.[0]?.tab_order){
-                const saved_tabs=sett[0].tab_order;
-                const merged=mergeTabOrder(saved_tabs);
-                setTabOrder(merged);
-              }
+              if(sett?.[0]?.tab_order){const merged=mergeTabOrder(sett[0].tab_order);setTabOrder(merged);}
+              if(sett?.[0]?.custom_statuses)setCustomStatuses(sett[0].custom_statuses||{});
+              if(sett?.[0]?.theme&&sett[0].theme!=="dark"){saveTheme(sett[0].theme);}
+              if(sett?.[0]?.accent_color&&sett[0].accent_color!=="#00D4FF"){saveAccent(sett[0].accent_color);}
             }catch{}
             setScreen("app");return;
           }
@@ -438,6 +594,21 @@ export default function QoderApp() {
     setTabOrder(order);
     if(!session||!cfg)return;
     try{await sb.upsertSettings(cfg.url,cfg.key,session.access_token,session.user.id,{tab_order:order});}catch{}
+  };
+
+  const savePreferences=async(prefs)=>{
+    // prefs: { theme?, accentColor?, customStatuses? }
+    if(prefs.theme!==undefined){saveTheme(prefs.theme);}
+    if(prefs.accentColor!==undefined){saveAccent(prefs.accentColor);}
+    if(prefs.customStatuses!==undefined){setCustomStatuses(prefs.customStatuses);}
+    if(!session||!cfg)return;
+    try{
+      await sb.upsertSettings(cfg.url,cfg.key,session.access_token,session.user.id,{
+        ...(prefs.theme!==undefined?{theme:prefs.theme}:{}),
+        ...(prefs.accentColor!==undefined?{accent_color:prefs.accentColor}:{}),
+        ...(prefs.customStatuses!==undefined?{custom_statuses:prefs.customStatuses}:{}),
+      });
+    }catch{}
   };
 
   // ── Background sync ──────────────────────────────────────────────────────────
@@ -553,8 +724,8 @@ export default function QoderApp() {
   const addProjectAndReturn=async(p)=>{
     const position=projects.length;
     try{
-      const row=await sb.post(cfg.url,cfg.key,T(),"projects",{user_id:session.user.id,name:p.name,description:p.description||null,status:p.status||"planning",tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,position,is_public:false});
-      const proj={id:row.id,name:row.name,description:row.description,status:row.status,techStack:row.tech_stack||[],localFolder:row.local_folder||null,gitUrl:row.git_url||"",supabaseUrl:row.supabase_url||"",vercelUrl:row.vercel_url||"",isPublic:false,publicSlug:null,position:row.position,createdAt:row.created_at,versions:[],milestones:[],notes:[],todos:[],assets:[],issues:[],ideas:[],concepts:[],buildLogs:[],environments:[],dependencies:[],tagIds:[]};
+      const row=await sb.post(cfg.url,cfg.key,T(),"projects",{user_id:session.user.id,name:p.name,description:p.description||null,status:p.status||"planning",tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,color:p.color||null,position,is_public:false});
+      const proj={id:row.id,name:row.name,description:row.description,status:row.status,techStack:row.tech_stack||[],localFolder:row.local_folder||null,gitUrl:row.git_url||"",supabaseUrl:row.supabase_url||"",vercelUrl:row.vercel_url||"",isPublic:false,publicSlug:null,color:row.color||null,position:row.position,createdAt:row.created_at,versions:[],milestones:[],notes:[],todos:[],assets:[],issues:[],ideas:[],concepts:[],buildLogs:[],environments:[],dependencies:[],tagIds:[],sprints:[],timeSessions:[]};
       setProjects(ps=>[...ps,proj]);
       showToast("Project created");
       // If created from template, apply template data
@@ -573,7 +744,7 @@ export default function QoderApp() {
     }catch(e){showToast(e.message,"err");return null;}
   };
   const updateProject=async(id,p)=>{
-    try{await sb.patch(cfg.url,cfg.key,T(),"projects",id,{name:p.name,description:p.description||null,status:p.status,tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null});mutate(id,x=>({...x,...p}));showToast("Project updated");}
+    try{await sb.patch(cfg.url,cfg.key,T(),"projects",id,{name:p.name,description:p.description||null,status:p.status,tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,color:p.color||null});mutate(id,x=>({...x,...p}));showToast("Project updated");}
     catch(e){showToast(e.message,"err");}
   };
   const deleteProject=async(id)=>{
@@ -607,9 +778,7 @@ export default function QoderApp() {
   const deleteNote=async(pid,nid)=>{try{await sb.del(cfg.url,cfg.key,T(),"notes",nid);mutate(pid,p=>({...p,notes:p.notes.filter(n=>n.id!==nid)}));showToast("Note deleted");}catch(e){showToast(e.message,"err");}};
   const reorderNotes=async(pid,reordered)=>{mutate(pid,p=>({...p,notes:reordered}));try{await Promise.all(reordered.map((n,i)=>sb.patch(cfg.url,cfg.key,T(),"notes",n.id,{position:i})));}catch{}};
 
-  // ── Todos ─────────────────────────────────────────────────────────────────────
-  const addTodo=async(pid,text,priority="medium")=>{const position=projects.find(p=>p.id===pid)?.todos?.length||0;try{const row=await sb.post(cfg.url,cfg.key,T(),"todos",{project_id:pid,text,completed:false,priority,position});mutate(pid,p=>({...p,todos:[...p.todos,{id:row.id,text:row.text,completed:false,completedAt:null,priority:row.priority||"medium",position:row.position,createdAt:row.created_at}]}));}catch(e){showToast(e.message,"err");}};
-  const toggleTodo=async(pid,tid)=>{const todo=projects.find(p=>p.id===pid)?.todos.find(t=>t.id===tid);if(!todo)return;const completed=!todo.completed;const completedAt=completed?new Date().toISOString():null;try{await sb.patch(cfg.url,cfg.key,T(),"todos",tid,{completed,completed_at:completedAt});mutate(pid,p=>({...p,todos:p.todos.map(t=>t.id===tid?{...t,completed,completedAt}:t)}));}catch(e){showToast(e.message,"err");}};
+  // ── Todos — addTodo and toggleTodo defined later with recurring support ────────
   const deleteTodo=async(pid,tid)=>{try{await sb.del(cfg.url,cfg.key,T(),"todos",tid);mutate(pid,p=>({...p,todos:p.todos.filter(t=>t.id!==tid)}));}catch(e){showToast(e.message,"err");}};
   const reorderTodos=async(pid,reordered)=>{mutate(pid,p=>({...p,todos:reordered}));try{await Promise.all(reordered.map((t,i)=>sb.patch(cfg.url,cfg.key,T(),"todos",t.id,{position:i})));}catch{}};
 
@@ -619,7 +788,55 @@ export default function QoderApp() {
   const uploadAssetFile=async(pid,file,name,type)=>{try{showToast("Uploading…","info");const url=await sb.uploadFile(cfg.url,cfg.key,T(),session.user.id,pid,file);await addAsset(pid,{name:name||file.name,url,type:type||"Screenshot"});}catch(e){showToast(e.message,"err");}};
 
   // ── Issues ────────────────────────────────────────────────────────────────────
-  const addIssue=async(pid,iss)=>{try{const row=await sb.post(cfg.url,cfg.key,T(),"issues",{project_id:pid,title:iss.title,description:iss.description||null,status:"open",priority:iss.priority||"medium"});mutate(pid,p=>({...p,issues:[{id:row.id,title:row.title,description:row.description,status:"open",priority:row.priority||"medium",fixDescription:null,fixedAt:null,createdAt:row.created_at},...p.issues]}));showToast("Issue logged");}catch(e){showToast(e.message,"err");}};
+  const addIssue=async(pid,iss)=>{try{const row=await sb.post(cfg.url,cfg.key,T(),"issues",{project_id:pid,title:iss.title,description:iss.description||null,status:"open",priority:iss.priority||"medium",screenshot_urls:iss.screenshotUrls||[]});mutate(pid,p=>({...p,issues:[{id:row.id,title:row.title,description:row.description,status:"open",priority:row.priority||"medium",screenshotUrls:row.screenshot_urls||[],fixDescription:null,fixedAt:null,createdAt:row.created_at},...p.issues]}));showToast("Issue logged");}catch(e){showToast(e.message,"err");}};
+  const uploadIssueScreenshot=async(pid,iid,file)=>{
+    try{
+      showToast("Uploading screenshot…","info");
+      const url=await sb.uploadFile(cfg.url,cfg.key,T(),session.user.id,pid,file);
+      const issue=projects.find(p=>p.id===pid)?.issues.find(i=>i.id===iid);
+      const newUrls=[...(issue?.screenshotUrls||[]),url];
+      await sb.patch(cfg.url,cfg.key,T(),"issues",iid,{screenshot_urls:newUrls});
+      mutate(pid,p=>({...p,issues:p.issues.map(i=>i.id===iid?{...i,screenshotUrls:newUrls}:i)}));
+      showToast("Screenshot added");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const removeIssueScreenshot=async(pid,iid,url)=>{
+    const issue=projects.find(p=>p.id===pid)?.issues.find(i=>i.id===iid);
+    const newUrls=(issue?.screenshotUrls||[]).filter(u=>u!==url);
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"issues",iid,{screenshot_urls:newUrls});
+      mutate(pid,p=>({...p,issues:p.issues.map(i=>i.id===iid?{...i,screenshotUrls:newUrls}:i)}));
+    }catch(e){showToast(e.message,"err");}
+  };
+
+  // ── Issue comments ────────────────────────────────────────────────────────────
+  const addIssueComment=async(pid,iid,content)=>{
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"issue_comments",{issue_id:iid,project_id:pid,content});
+      const comment={id:row.id,content:row.content,createdAt:row.created_at};
+      mutate(pid,p=>({...p,issues:p.issues.map(i=>i.id===iid?{...i,comments:[...(i.comments||[]),comment]}:i)}));
+    }catch(e){showToast(e.message,"err");}
+  };
+  const deleteIssueComment=async(pid,iid,cid)=>{
+    try{
+      await sb.del(cfg.url,cfg.key,T(),"issue_comments",cid);
+      mutate(pid,p=>({...p,issues:p.issues.map(i=>i.id===iid?{...i,comments:(i.comments||[]).filter(c=>c.id!==cid)}:i)}));
+    }catch(e){showToast(e.message,"err");}
+  };
+
+  // ── GitHub Release ────────────────────────────────────────────────────────────
+  const publishRelease=async(pid,tagName,releaseName,body,token,draft)=>{
+    const proj=projects.find(p=>p.id===pid);
+    const repo=parseGitHubRepo(proj?.gitUrl);
+    if(!repo)return showToast("No GitHub URL on this project","err");
+    if(!token)return showToast("GitHub token required to publish releases","err");
+    try{
+      showToast("Publishing to GitHub…","info");
+      const rel=await publishGitHubRelease(repo.owner,repo.repo,token,tagName,releaseName,body,draft);
+      showToast(draft?"Draft release created — review on GitHub":"Release published on GitHub","ok");
+      return rel.html_url;
+    }catch(e){showToast(e.message,"err");return null;}
+  };
   const fixIssue=async(pid,iid,fixDescription)=>{
     const fixedAt=new Date().toISOString();
     try{
@@ -718,6 +935,79 @@ export default function QoderApp() {
   const deleteConcept=async(pid,cid)=>{try{await sb.del(cfg.url,cfg.key,T(),"concepts",cid);mutate(pid,p=>({...p,concepts:p.concepts.filter(c=>c.id!==cid)}));showToast("Concept removed");}catch(e){showToast(e.message,"err");}};
   const uploadConceptFile=async(pid,file,label,type)=>{try{showToast("Uploading…","info");const url=await sb.uploadFile(cfg.url,cfg.key,T(),session.user.id,pid,file);await addConcept(pid,{type,label:label||file.name,content:url});}catch(e){showToast(e.message,"err");}};
 
+  // ── Sprints ───────────────────────────────────────────────────────────────────
+  const addSprint=async(pid,sp)=>{
+    const position=projects.find(p=>p.id===pid)?.sprints?.length||0;
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"sprints",{project_id:pid,name:sp.name,goal:sp.goal||null,start_date:sp.startDate||null,end_date:sp.endDate||null,status:"active",position});
+      mutate(pid,p=>({...p,sprints:[...p.sprints,{id:row.id,name:row.name,goal:row.goal,startDate:row.start_date,endDate:row.end_date,status:"active",position:row.position,createdAt:row.created_at}]}));
+      showToast("Sprint created");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const updateSprintStatus=async(pid,sid,status)=>{
+    try{await sb.patch(cfg.url,cfg.key,T(),"sprints",sid,{status});mutate(pid,p=>({...p,sprints:p.sprints.map(sp=>sp.id===sid?{...sp,status}:sp)}));}
+    catch(e){showToast(e.message,"err");}
+  };
+  const deleteSprint=async(pid,sid)=>{
+    try{await sb.del(cfg.url,cfg.key,T(),"sprints",sid);mutate(pid,p=>({...p,sprints:p.sprints.filter(sp=>sp.id!==sid),todos:p.todos.map(t=>t.sprintId===sid?{...t,sprintId:null}:t)}));showToast("Sprint removed");}
+    catch(e){showToast(e.message,"err");}
+  };
+  const assignTodoToSprint=async(pid,tid,sprintId)=>{
+    try{await sb.patch(cfg.url,cfg.key,T(),"todos",tid,{sprint_id:sprintId||null});mutate(pid,p=>({...p,todos:p.todos.map(t=>t.id===tid?{...t,sprintId:sprintId||null}:t)}));}
+    catch(e){showToast(e.message,"err");}
+  };
+
+  // ── Time tracker ──────────────────────────────────────────────────────────────
+  const startTimer=async(pid)=>{
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"time_sessions",{project_id:pid,started_at:new Date().toISOString()});
+      const sess={id:row.id,startedAt:row.started_at,endedAt:null,durationSeconds:null,note:null,createdAt:row.created_at};
+      mutate(pid,p=>({...p,timeSessions:[sess,...p.timeSessions]}));
+      showToast("Timer started","ok");
+      return sess;
+    }catch(e){showToast(e.message,"err");return null;}
+  };
+  const stopTimer=async(pid,sessionId,note="")=>{
+    const sess=projects.find(p=>p.id===pid)?.timeSessions.find(s=>s.id===sessionId);
+    if(!sess)return;
+    const endedAt=new Date().toISOString();
+    const durationSeconds=Math.round((new Date(endedAt)-new Date(sess.startedAt))/1000);
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"time_sessions",sessionId,{ended_at:endedAt,duration_seconds:durationSeconds,note:note||null});
+      mutate(pid,p=>({...p,timeSessions:p.timeSessions.map(s=>s.id===sessionId?{...s,endedAt,durationSeconds,note}:s)}));
+      showToast(`Logged ${fmtDuration(durationSeconds)}`,"ok");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const deleteTimeSession=async(pid,sid)=>{
+    try{await sb.del(cfg.url,cfg.key,T(),"time_sessions",sid);mutate(pid,p=>({...p,timeSessions:p.timeSessions.filter(s=>s.id!==sid)}));}
+    catch(e){showToast(e.message,"err");}
+  };
+
+  // ── Recurring todos ───────────────────────────────────────────────────────────
+  const addTodo=async(pid,text,priority="medium",recurring=false,recurrenceType=null)=>{
+    const position=projects.find(p=>p.id===pid)?.todos?.length||0;
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"todos",{project_id:pid,text,completed:false,priority,recurring,recurrence_type:recurrenceType||null,position});
+      mutate(pid,p=>({...p,todos:[...p.todos,{id:row.id,text:row.text,completed:false,completedAt:null,priority:row.priority||"medium",recurring:row.recurring||false,recurrenceType:row.recurrence_type||null,sprintId:null,position:row.position,createdAt:row.created_at}]}));
+    }catch(e){showToast(e.message,"err");}
+  };
+  const toggleTodo=async(pid,tid)=>{
+    const todo=projects.find(p=>p.id===pid)?.todos.find(t=>t.id===tid);if(!todo)return;
+    const completed=!todo.completed;
+    const completedAt=completed?new Date().toISOString():null;
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"todos",tid,{completed,completed_at:completedAt});
+      mutate(pid,p=>({...p,todos:p.todos.map(t=>t.id===tid?{...t,completed,completedAt}:t)}));
+      // Auto-regenerate if recurring and just completed
+      if(completed&&todo.recurring&&todo.recurrenceType){
+        const position=projects.find(p=>p.id===pid)?.todos?.length||0;
+        const row=await sb.post(cfg.url,cfg.key,T(),"todos",{project_id:pid,text:todo.text,completed:false,priority:todo.priority,recurring:true,recurrence_type:todo.recurrenceType,position});
+        mutate(pid,p=>({...p,todos:[...p.todos,{id:row.id,text:row.text,completed:false,completedAt:null,priority:row.priority||"medium",recurring:true,recurrenceType:row.recurrence_type,sprintId:null,position:row.position,createdAt:row.created_at}]}));
+        showToast(`Recurring task regenerated`,"info");
+      }
+    }catch(e){showToast(e.message,"err");}
+  };
+
   // ── Templates ─────────────────────────────────────────────────────────────────
   const loadTemplates=async()=>{
     try{
@@ -805,6 +1095,7 @@ export default function QoderApp() {
   return(
     <div style={s.root}>
       <style>{css}</style>
+      <style>{buildThemeCSS(theme,accentColor)}</style>
       {toast&&<Toast {...toast}/>}
       {lightbox&&<Lightbox url={lightbox.url} name={lightbox.name} onClose={()=>setLightbox(null)}/>}
       {confirmState&&<ConfirmDialog msg={confirmState.msg} onYes={()=>{confirmState.resolve(true);setConfirmState(null);}} onNo={()=>{confirmState.resolve(false);setConfirmState(null);}}/>}
@@ -858,7 +1149,7 @@ export default function QoderApp() {
             {projects.length>0&&<>
               <div style={s.navSection}>Projects</div>
               <DraggableSidebarList items={projects} onReorder={reorderProjects}>
-                {p=><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} small/>}
+                {p=><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/>}
               </DraggableSidebarList>
             </>}
           </nav>
@@ -897,17 +1188,29 @@ export default function QoderApp() {
             onEditNote={n=>openModal("edit-note",{...n})}
             onDeleteNote={nid=>deleteNote(liveProj.id,nid)}
             onReorderNotes={r=>reorderNotes(liveProj.id,r)}
-            onAddTodo={(text,priority)=>addTodo(liveProj.id,text,priority)}
+            onAddTodo={(text,priority,recurring,recurrenceType)=>addTodo(liveProj.id,text,priority,recurring,recurrenceType)}
             onToggleTodo={tid=>toggleTodo(liveProj.id,tid)}
             onDeleteTodo={tid=>deleteTodo(liveProj.id,tid)}
             onReorderTodos={r=>reorderTodos(liveProj.id,r)}
+            onAddSprint={()=>openModal("add-sprint",{})}
+            onUpdateSprintStatus={(sid,st)=>updateSprintStatus(liveProj.id,sid,st)}
+            onDeleteSprint={sid=>deleteSprint(liveProj.id,sid)}
+            onAssignTodoToSprint={(tid,sid)=>assignTodoToSprint(liveProj.id,tid,sid)}
+            onStartTimer={()=>startTimer(liveProj.id)}
+            onStopTimer={(sid,note)=>stopTimer(liveProj.id,sid,note)}
+            onDeleteTimeSession={sid=>deleteTimeSession(liveProj.id,sid)}
             onAddAsset={()=>openModal("add-asset",{type:"Link"})}
             onDeleteAsset={aid=>deleteAsset(liveProj.id,aid)}
             onUploadAssetFile={(file,name,type)=>uploadAssetFile(liveProj.id,file,name,type)}
-            onAddIssue={()=>openModal("add-issue",{priority:"medium"})}
+            onAddIssue={()=>openModal("add-issue",{priority:"medium",screenshotUrls:[]})}
             onFixIssue={iss=>openModal("fix-issue",{...iss})}
             onDeleteIssue={iid=>deleteIssue(liveProj.id,iid)}
             onUpdateIssuePriority={(iid,p)=>updateIssuePriority(liveProj.id,iid,p)}
+            onUploadIssueScreenshot={(iid,file)=>uploadIssueScreenshot(liveProj.id,iid,file)}
+            onRemoveIssueScreenshot={(iid,url)=>removeIssueScreenshot(liveProj.id,iid,url)}
+            onAddIssueComment={(iid,content)=>addIssueComment(liveProj.id,iid,content)}
+            onDeleteIssueComment={(iid,cid)=>deleteIssueComment(liveProj.id,iid,cid)}
+            onPublishRelease={(tag,name,body,token,draft)=>publishRelease(liveProj.id,tag,name,body,token,draft)}
             onAddBuildLog={()=>openModal("add-build",{platform:"android",status:"building",versionId:liveProj.versions?.[0]?.id||""})}
             onUpdateBuildStatus={(bid,st)=>updateBuildStatus(liveProj.id,bid,st)}
             onDeleteBuildLog={bid=>deleteBuildLog(liveProj.id,bid)}
@@ -926,7 +1229,7 @@ export default function QoderApp() {
             onDeleteConcept={cid=>deleteConcept(liveProj.id,cid)}
             onUploadConceptFile={(file,label,type)=>uploadConceptFile(liveProj.id,file,label,type)}
             onLightbox={(url,name)=>setLightbox({url,name})}
-            onEdit={()=>openModal("edit-project",{...liveProj,tagIds:liveProj.tagIds||[]})}
+            onEdit={()=>openModal("edit-project",{...liveProj,tagIds:liveProj.tagIds||[],color:liveProj.color||null})}
             onDelete={async()=>{if(await qConfirm("Delete this project? This cannot be undone."))deleteProject(liveProj.id);}}
             onArchive={async()=>{if(await qConfirm("Archive this project? A JSON export will be downloaded first."))archiveProject(liveProj.id);}}
             onChangelog={()=>openModal("changelog",{})}
@@ -957,7 +1260,7 @@ export default function QoderApp() {
       {modal&&<ModalWrap onClose={closeModal}>
         {modal==="add-project"  &&<ProjectForm   data={form} setData={setForm} title="New Project"  userTags={userTags} templates={templates} onSubmit={async d=>{const proj=await addProjectAndReturn(d);if(proj&&d.tagIds?.length)await Promise.all(d.tagIds.map(tid=>assignTag(proj.id,tid)));closeModal();}} onCancel={closeModal}/>}
         {modal==="edit-project" &&<ProjectForm   data={form} setData={setForm} title="Edit Project" userTags={userTags} templates={templates} onSubmit={async d=>{await updateProject(selProj.id,d);const cur=selProj.tagIds||[];const add=(d.tagIds||[]).filter(id=>!cur.includes(id));const rem=cur.filter(id=>!(d.tagIds||[]).includes(id));await Promise.all([...add.map(id=>assignTag(selProj.id,id)),...rem.map(id=>unassignTag(selProj.id,id))]);closeModal();}} onCancel={closeModal}/>}
-        {modal==="changelog"    &&<ChangelogModal project={liveProj||selProj} onClose={closeModal}/>}
+        {modal==="changelog"    &&<ChangelogModal project={liveProj||selProj} onClose={closeModal} onPublishRelease={(tag,name,body,token,draft)=>publishRelease(liveProj?.id||selProj?.id,tag,name,body,token,draft)}/>}
         {modal==="add-version"  &&<VersionForm   data={form} setData={setForm} onSubmit={d=>{addVersion(selProj.id,d);closeModal();}}                                     onCancel={closeModal}/>}
         {modal==="add-milestone"&&<MilestoneForm data={form} setData={setForm} onSubmit={d=>{addMilestone(selProj.id,d);closeModal();}}                                   onCancel={closeModal}/>}
         {modal==="add-note"     &&<NoteForm      data={form} setData={setForm} title="Add Note"  onSubmit={d=>{addNote(selProj.id,d.content);closeModal();}}              onCancel={closeModal}/>}
@@ -965,7 +1268,7 @@ export default function QoderApp() {
         {modal==="add-asset"    &&<AssetForm     data={form} setData={setForm} onSubmit={d=>{addAsset(selProj.id,d);closeModal();}}                                       onCancel={closeModal}/>}
         {modal==="add-issue"    &&<IssueForm     data={form} setData={setForm} onSubmit={d=>{addIssue(selProj.id,d);closeModal();}}                                       onCancel={closeModal}/>}
         {modal==="fix-issue"    &&<FixIssueModal data={form} setData={setForm} onSubmit={d=>{fixIssue(selProj.id,d.id,d.fixDescription);closeModal();}}                  onCancel={closeModal}/>}
-        {modal==="add-build"    &&<BuildLogForm  data={form} setData={setForm} versions={selProj?.versions||[]} onSubmit={d=>{addBuildLog(selProj.id,d);closeModal();}}  onCancel={closeModal}/>}
+        {modal==="add-sprint"    &&<SprintForm    data={form} setData={setForm} onSubmit={d=>{addSprint(selProj.id,d);closeModal();}} onCancel={closeModal}/>}
         {modal==="add-env"      &&<EnvironmentForm data={form} setData={setForm} title="Add Environment" onSubmit={d=>{addEnvironment(selProj.id,d);closeModal();}}      onCancel={closeModal}/>}
         {modal==="edit-env"     &&<EnvironmentForm data={form} setData={setForm} title="Edit Environment" onSubmit={d=>{updateEnvironment(selProj.id,d.id,d);closeModal();}} onCancel={closeModal}/>}
         {modal==="add-dep"      &&<DependencyForm data={form} setData={setForm} onSubmit={d=>{addDependency(selProj.id,d);closeModal();}}                                  onCancel={closeModal}/>}
@@ -974,7 +1277,7 @@ export default function QoderApp() {
         {modal==="add-concept"  &&<ConceptForm   data={form} setData={setForm} cfg={cfg} session={session} projectId={selProj?.id} onSubmit={d=>{addConcept(selProj.id,d);closeModal();}} onUploadFile={(file,label,type)=>{uploadConceptFile(selProj.id,file,label,type);closeModal();}} onCancel={closeModal}/>}
         {modal==="save-template" &&<SaveTemplateModal data={form} setData={setForm} onSubmit={d=>{saveTemplate(selProj.id,d.name);closeModal();}} onCancel={closeModal}/>}
         {modal==="manage-templates"&&<ManageTemplatesModal templates={templates} onDelete={deleteTemplate} onApply={tid=>{if(selProj){applyTemplate(selProj.id,tid);}closeModal();}} onCancel={closeModal}/>}
-        {modal==="settings"     &&<SettingsModal tabOrder={tabOrder} userTags={userTags} templates={templates} onSave={order=>{saveTabOrderSync(order);closeModal();}} onAddTag={addTag} onDeleteTag={deleteTag} onOpenTemplates={()=>openModal("manage-templates",{})} onCancel={closeModal}/>}
+        {modal==="settings"     &&<SettingsModal tabOrder={tabOrder} userTags={userTags} templates={templates} updateStatus={updateStatus} theme={theme} accentColor={accentColor} customStatuses={customStatuses} onCheckForUpdates={()=>{window.electronAPI?.checkForUpdates?.();setUpdateStatus("checking");setTimeout(()=>setUpdateStatus(s=>s==="checking"?null:s),8000);}} onSave={order=>saveTabOrderSync(order)} onSavePreferences={prefs=>{savePreferences(prefs);closeModal();}} onAddTag={addTag} onDeleteTag={deleteTag} onOpenTemplates={()=>openModal("manage-templates",{})} onCancel={closeModal}/>}
       </ModalWrap>}
     </div>
   );
@@ -1018,12 +1321,15 @@ function AuthScreen({onAuth,busy,onReset}){
 }
 
 // ── NavBtn ────────────────────────────────────────────────────────────────────
-function NavBtn({active,onClick,icon,label,small,folder}){
+function NavBtn({active,onClick,icon,label,small,folder,projectColor}){
   const hasFolder=!!window.electronAPI?.openFolder&&!!folder;
+  const dot=projectColor
+    ?<span style={{width:8,height:8,borderRadius:"50%",background:projectColor,flexShrink:0,display:"inline-block"}}/>
+    :icon;
   return(
     <div className={`q-nav${active?" q-nav-active":""}`} onClick={onClick} style={{fontSize:small?14:13,paddingLeft:small?22:14,display:"flex",alignItems:"center"}}>
-      <span style={{fontSize:small?9:13,marginRight:7,display:"flex",alignItems:"center",flexShrink:0}}>{icon}</span>
-      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,color:active?"#00D4FF":small?"#C8CBDF":"inherit",fontWeight:small?600:500}}>{label}</span>
+      <span style={{fontSize:small?9:13,marginRight:7,display:"flex",alignItems:"center",flexShrink:0}}>{dot}</span>
+      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,color:active?"var(--accent)":small?"#C8CBDF":"inherit",fontWeight:small?600:500}}>{label}</span>
       {hasFolder&&<button className="q-folder-btn" onClick={e=>{e.stopPropagation();window.electronAPI.openFolder(folder);}} title={folder}><FolderIcon size={13}/></button>}
     </div>
   );
@@ -1162,7 +1468,7 @@ function ProjectCard({project,userTags,onClick}){
   const pct=msTotal>0?Math.round((msDone/msTotal)*100):null;
   const tags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
   return(
-    <div className="q-card" onClick={onClick}>
+    <div className="q-card" onClick={onClick} style={project.color?{borderLeft:`3px solid ${project.color}`}:{}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
         <span style={{...s.badge,color:cfg.color,background:cfg.bg}}>{cfg.label}</span>
         <span style={s.mono12}>{latVer}</span>
@@ -1212,7 +1518,7 @@ function ScrollableTabBar({children,isMobile}){
 }
 
 // ── ProjectView ───────────────────────────────────────────────────────────────
-function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onEdit,onArchive,onDelete}){
+function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onDelete}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
@@ -1220,6 +1526,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
     overview:null,
     versions:project.versions?.length||0,
     milestones:project.milestones?.length||0,
+    sprints:project.sprints?.filter(sp=>sp.status==="active").length||0,
     todos:project.todos?.filter(t=>!t.completed).length||0,
     notes:project.notes?.length||0,
     assets:project.assets?.length||0,
@@ -1227,6 +1534,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
     "build-log":project.buildLogs?.length||0,
     environments:project.environments?.length||0,
     dependencies:project.dependencies?.filter(d=>d.status!=="ok").length||0,
+    time:project.timeSessions?.length||0,
     ideas:project.ideas?.length||0,
     concepts:project.concepts?.length||0,
     github:parseGitHubRepo(project.gitUrl)?githubData?.commits?.length||0:0,
@@ -1292,10 +1600,12 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
       {tab==="overview"   &&<OverviewTab   project={project} latestVer={latVer}/>}
       {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion} onDelete={onDeleteVersion} onChangelog={onChangelog}/>}
       {tab==="milestones" &&<MilestonesTab project={project} onAdd={onAddMilestone} onToggle={onToggleMilestone} onDelete={onDeleteMilestone}/>}
-      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos}/>}
+      {tab==="sprints"    &&<SprintsTab    project={project} onAdd={onAddSprint} onUpdateStatus={onUpdateSprintStatus} onDelete={onDeleteSprint} onAssignTodo={onAssignTodoToSprint}/>}
+      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint}/>}
+      {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession}/>}
       {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes}/>}
       {tab==="assets"     &&<AssetsTab     project={project} onAdd={onAddAsset}     onDelete={onDeleteAsset}    onUploadFile={onUploadAssetFile} onLightbox={onLightbox}/>}
-      {tab==="issues"     &&<IssuesTab     project={project} onAdd={onAddIssue}     onFix={onFixIssue}         onDelete={onDeleteIssue}  onUpdatePriority={onUpdateIssuePriority}/>}
+      {tab==="issues"     &&<IssuesTab     project={project} onAdd={onAddIssue}     onFix={onFixIssue}         onDelete={onDeleteIssue}  onUpdatePriority={onUpdateIssuePriority} onUploadScreenshot={onUploadIssueScreenshot} onRemoveScreenshot={onRemoveIssueScreenshot} onAddComment={onAddIssueComment} onDeleteComment={onDeleteIssueComment} onLightbox={onLightbox}/>}
       {tab==="build-log"  &&<BuildLogTab   project={project} onAdd={onAddBuildLog}   onUpdateStatus={onUpdateBuildStatus} onDelete={onDeleteBuildLog}/>}
       {tab==="environments"&&<EnvironmentsTab project={project} onAdd={onAddEnvironment} onEdit={onEditEnvironment} onDelete={onDeleteEnvironment}/>}
       {tab==="dependencies"&&<DependenciesTab project={project} onAdd={onAddDependency} onUpdateStatus={onUpdateDepStatus} onDelete={onDeleteDependency}/>}
@@ -1411,40 +1721,63 @@ function MilestonesTab({project,onAdd,onToggle,onDelete}){
 }
 
 // ── Todo Tab ──────────────────────────────────────────────────────────────────
-function TodoTab({project,onAdd,onToggle,onDelete,onReorder}){
+function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSprint}){
   const [newText,setNewText]=useState("");
   const [newPriority,setNewPriority]=useState("medium");
+  const [newRecurring,setNewRecurring]=useState(false);
+  const [newRecType,setNewRecType]=useState("weekly");
   const todos=project.todos||[];
   const pending=todos.filter(t=>!t.completed).sort((a,b)=>{const o=["critical","high","medium","low"];return o.indexOf(a.priority||"medium")-o.indexOf(b.priority||"medium");});
   const done=todos.filter(t=>t.completed);
-  const handleAdd=()=>{const t=newText.trim();if(!t)return;onAdd(t,newPriority);setNewText("");};
+  const activeSprints=(sprints||[]).filter(sp=>sp.status==="active");
+  const handleAdd=()=>{const t=newText.trim();if(!t)return;onAdd(t,newPriority,newRecurring,newRecurring?newRecType:null);setNewText("");};
   return(
     <div>
       <div style={s.tabBar}><span style={s.mono12}>{done.length}/{todos.length} completed</span></div>
-      <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
+      <div style={{display:"flex",gap:8,marginBottom:6,flexWrap:"wrap"}}>
         <input className="q-input" style={{flex:1,minWidth:180,marginTop:0}} value={newText} onChange={e=>setNewText(e.target.value)} placeholder="Add a to-do…" onKeyDown={e=>e.key==="Enter"&&handleAdd()}/>
         <select className="q-input" style={{width:130,marginTop:0}} value={newPriority} onChange={e=>setNewPriority(e.target.value)}>
           {PRIORITY_KEYS.map(k=><option key={k} value={k}>{PRIORITY_CONFIG[k].icon} {PRIORITY_CONFIG[k].label}</option>)}
         </select>
         <button className="q-btn-primary" style={{flexShrink:0,padding:"0 16px"}} onClick={handleAdd}>Add</button>
       </div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,color:"#8B8FA8"}}>
+          <input type="checkbox" checked={newRecurring} onChange={e=>setNewRecurring(e.target.checked)} style={{accentColor:"#00D4FF"}}/>
+          Recurring
+        </label>
+        {newRecurring&&<select className="q-input" style={{width:140,marginTop:0,fontSize:12}} value={newRecType} onChange={e=>setNewRecType(e.target.value)}>
+          {Object.entries(RECURRENCE_TYPES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+        </select>}
+      </div>
       {todos.length===0&&<div style={s.empty}><p>No to-do items yet.</p></div>}
-      {pending.length>0&&<DraggableList items={pending} onReorder={r=>onReorder([...r,...done])}>{todo=><TodoRow todo={todo} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}}/>}</DraggableList>}
-      {done.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",padding:"14px 0 6px",fontWeight:700}}>Completed ({done.length})</div>{done.map(todo=><TodoRow key={todo.id} todo={todo} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}}/>)}</>}
+      {pending.length>0&&<DraggableList items={pending} onReorder={r=>onReorder([...r,...done])}>{todo=><TodoRow todo={todo} activeSprints={activeSprints} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}} onAssignSprint={sid=>onAssignSprint(todo.id,sid)}/>}</DraggableList>}
+      {done.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",padding:"14px 0 6px",fontWeight:700}}>Completed ({done.length})</div>{done.map(todo=><TodoRow key={todo.id} todo={todo} activeSprints={activeSprints} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}} onAssignSprint={sid=>onAssignSprint(todo.id,sid)}/>)}</>}
     </div>
   );
 }
-function TodoRow({todo,onToggle,onDelete}){
+function TodoRow({todo,onToggle,onDelete,activeSprints,onAssignSprint}){
   const pc=PRIORITY_CONFIG[todo.priority||"medium"];
+  const sprint=activeSprints?.find(sp=>sp.id===todo.sprintId);
   return(
     <div className="q-ms-row" style={{opacity:todo.completed?.5:1}}>
       <span style={{color:"#3A4060",fontSize:16,cursor:"grab",userSelect:"none",flexShrink:0}}>⠿</span>
       <button className={`q-check${todo.completed?" q-check-done":""}`} onClick={onToggle}>{todo.completed&&"✓"}</button>
       <span style={{fontSize:11,flexShrink:0,marginTop:1}} title={pc.label}>{pc.icon}</span>
       <div style={{flex:1}}>
-        <span style={{color:"#E8EAF6",fontWeight:500,textDecoration:todo.completed?"line-through":"none",fontSize:14}}>{todo.text}</span>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          <span style={{color:"#E8EAF6",fontWeight:500,textDecoration:todo.completed?"line-through":"none",fontSize:14}}>{todo.text}</span>
+          {todo.recurring&&<span style={{fontSize:10,padding:"1px 6px",borderRadius:8,background:"rgba(0,212,255,.08)",color:"#00D4FF",fontFamily:"'JetBrains Mono'"}}>{RECURRENCE_TYPES[todo.recurrenceType]?.icon||"↺"} {RECURRENCE_TYPES[todo.recurrenceType]?.label||"Recurring"}</span>}
+          {sprint&&<span style={{fontSize:10,padding:"1px 6px",borderRadius:8,background:"rgba(180,127,255,.1)",color:"#B47FFF",fontFamily:"'Syne'",fontWeight:600}}>{sprint.name}</span>}
+        </div>
         {todo.completed&&todo.completedAt&&<p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4ADE80",marginTop:3,opacity:.75}}>✓ {new Date(todo.completedAt).toLocaleDateString()} at {new Date(todo.completedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>}
       </div>
+      {activeSprints?.length>0&&!todo.completed&&(
+        <select value={todo.sprintId||""} onChange={e=>onAssignSprint(e.target.value||null)} style={{fontFamily:"'Syne'",fontSize:11,background:"#0D1120",border:"1px solid #1E2540",borderRadius:6,color:"#6B7290",padding:"2px 6px",cursor:"pointer"}}>
+          <option value="">No Sprint</option>
+          {activeSprints.map(sp=><option key={sp.id} value={sp.id}>{sp.name}</option>)}
+        </select>
+      )}
       <button className="q-del" onClick={onDelete}>✕</button>
     </div>
   );
@@ -1452,8 +1785,45 @@ function TodoRow({todo,onToggle,onDelete}){
 
 // ── Notes Tab ─────────────────────────────────────────────────────────────────
 function NotesTab({project,onAdd,onEdit,onDelete,onReorder}){
+  const [search,setSearch]=useState("");
+  const [mdMode,setMdMode]=useState(true);
   const notes=project.notes||[];
-  return(<div><div style={s.tabBar}><span style={s.mono12}>{notes.length} {notes.length===1?"note":"notes"}</span><button className="q-btn-primary" onClick={onAdd}>+ Add Note</button></div>{notes.length===0?<div style={s.empty}><p>No notes yet.</p></div>:(<DraggableList items={notes} onReorder={onReorder}>{note=><div className="q-ver-card" style={{marginBottom:10}}><div style={{display:"flex",gap:10,alignItems:"flex-start"}}><span style={{color:"#3A4060",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span><p style={{color:"#B8BDD4",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap",flex:1}}>{note.content}</p><div style={{display:"flex",gap:6,flexShrink:0}}><button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit(note)}>Edit</button><button className="q-del" onClick={async()=>{if(await qConfirm("Delete this note?"))onDelete(note.id);}}>✕</button></div></div><div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>{new Date(note.createdAt).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"})}</div></div>}</DraggableList>)}</div>);
+  const filtered=search.trim()?notes.filter(n=>n.content.toLowerCase().includes(search.toLowerCase())):notes;
+  const isSearching=!!search.trim();
+  return(
+    <div>
+      <div style={s.tabBar}>
+        <span style={s.mono12}>{notes.length} {notes.length===1?"note":"notes"}{isSearching?` · ${filtered.length} matching`:""}</span>
+        <div style={{display:"flex",gap:8}}>
+          <button className={`q-chip${mdMode?" q-chip-on":""}`} style={{fontSize:11}} onClick={()=>setMdMode(v=>!v)}>{mdMode?"Markdown On":"Plain Text"}</button>
+          <button className="q-btn-primary" onClick={onAdd}>+ Add Note</button>
+        </div>
+      </div>
+      <input className="q-input" style={{marginBottom:14,marginTop:0}} placeholder="Search notes…" value={search} onChange={e=>setSearch(e.target.value)}/>
+      {notes.length===0?<div style={s.empty}><p>No notes yet.</p></div>:
+        filtered.length===0?<div style={s.empty}><p>No notes match "{search}"</p></div>:(
+        <DraggableList items={isSearching?filtered:notes} onReorder={isSearching?()=>{}:onReorder}>{note=>(
+          <div className="q-ver-card" style={{marginBottom:10}}>
+            <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+              {!isSearching&&<span style={{color:"#3A4060",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span>}
+              <div style={{flex:1,minWidth:0}}>
+                {mdMode
+                  ?<div style={{lineHeight:1.7}}>{renderMarkdown(note.content)}</div>
+                  :<p style={{color:"#B8BDD4",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap"}}>{note.content}</p>
+                }
+              </div>
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit(note)}>Edit</button>
+                <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this note?"))onDelete(note.id);}}>✕</button>
+              </div>
+            </div>
+            <div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>{new Date(note.createdAt).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"})}</div>
+          </div>
+        )}</DraggableList>
+      )}
+      {mdMode&&notes.length>0&&<p style={{...s.mono10,color:"#4B5268",marginTop:12,textAlign:"center"}}>Markdown on · **bold** *italic* `code` # Heading · toggle above for plain text</p>}
+    </div>
+  );
 }
 
 // ── Assets Tab ────────────────────────────────────────────────────────────────
@@ -1499,40 +1869,98 @@ function AssetsTab({project,onAdd,onDelete,onUploadFile,onLightbox}){
 }
 
 // ── Issues Tab ────────────────────────────────────────────────────────────────
-function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority}){
+function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreenshot,onRemoveScreenshot,onAddComment,onDeleteComment,onLightbox}){
   const issues=project.issues||[];
   const open=issues.filter(i=>i.status==="open").sort((a,b)=>{const o=["critical","high","medium","low"];return o.indexOf(a.priority)-o.indexOf(b.priority);});
   const fixed=issues.filter(i=>i.status==="fixed");
+  const fileRefs=useRef({});
+  const [commentText,setCommentText]=useState({}); // keyed by issue id
+  const [expandedComments,setExpandedComments]=useState({});
+
+  const setComment=(iid,val)=>setCommentText(prev=>({...prev,[iid]:val}));
+  const toggleComments=(iid)=>setExpandedComments(prev=>({...prev,[iid]:!prev[iid]}));
+  const submitComment=async(iid)=>{
+    const text=(commentText[iid]||"").trim();
+    if(!text)return;
+    await onAddComment(iid,text);
+    setCommentText(prev=>({...prev,[iid]:""}));
+  };
+
   return(
     <div>
       <div style={s.tabBar}><span style={s.mono12}>{open.length} open · {fixed.length} fixed</span><button className="q-btn-primary" onClick={onAdd}>+ Log Issue</button></div>
       {issues.length===0&&<div style={s.empty}><p>No issues logged. 🎉</p></div>}
-      {open.length>0&&<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>{open.map(iss=>{const pc=PRIORITY_CONFIG[iss.priority||"medium"];return(
-        <div key={iss.id} className="q-ver-card" style={{borderLeft:`3px solid ${pc.color}`}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
-            <div style={{flex:1}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
-                <span style={{...s.badge,color:pc.color,background:pc.bg,fontSize:10}}>{pc.icon} {pc.label}</span>
-                <span style={{color:"#E8EAF6",fontWeight:600,fontSize:14}}>{iss.title}</span>
+      {open.length>0&&<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>{open.map(iss=>{
+        const pc=PRIORITY_CONFIG[iss.priority||"medium"];
+        const commentCount=(iss.comments||[]).length;
+        const isExpanded=expandedComments[iss.id];
+        return(
+          <div key={iss.id} className="q-ver-card" style={{borderLeft:`3px solid ${pc.color}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
+                  <span style={{...s.badge,color:pc.color,background:pc.bg,fontSize:10}}>{pc.icon} {pc.label}</span>
+                  <span style={{color:"#E8EAF6",fontWeight:600,fontSize:14}}>{iss.title}</span>
+                </div>
+                {iss.description&&<p style={{color:"#8B8FA8",fontSize:13,lineHeight:1.6,marginBottom:8}}>{iss.description}</p>}
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+                  {PRIORITY_KEYS.map(pk=><button key={pk} onClick={()=>onUpdatePriority(iss.id,pk)} style={{fontSize:10,padding:"2px 8px",background:iss.priority===pk?PRIORITY_CONFIG[pk].bg:"transparent",border:`1px solid ${iss.priority===pk?PRIORITY_CONFIG[pk].color:"#1E2540"}`,borderRadius:12,color:iss.priority===pk?PRIORITY_CONFIG[pk].color:"#6B7290",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>{PRIORITY_CONFIG[pk].label}</button>)}
+                </div>
+                {/* Screenshots */}
+                {(iss.screenshotUrls||[]).length>0&&(
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
+                    {iss.screenshotUrls.map((url,i)=>(
+                      <div key={i} style={{position:"relative",display:"inline-block"}}>
+                        <img src={url} alt={`Screenshot ${i+1}`} onClick={()=>onLightbox(url,`${iss.title} — screenshot ${i+1}`)} style={{width:80,height:80,objectFit:"cover",borderRadius:6,cursor:"pointer",border:"1px solid #1A2040"}}/>
+                        <button onClick={()=>onRemoveScreenshot(iss.id,url)} style={{position:"absolute",top:-6,right:-6,width:18,height:18,borderRadius:"50%",background:"#FF4466",border:"none",color:"#fff",fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <div style={{...s.mono10,color:"#2E3558"}}>Logged {new Date(iss.createdAt).toLocaleDateString()}</div>
+                  <button onClick={()=>fileRefs.current[iss.id]?.click()} className="q-btn-ghost" style={{fontSize:11,padding:"2px 10px"}}>Add Screenshot</button>
+                  <input ref={el=>fileRefs.current[iss.id]=el} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)onUploadScreenshot(iss.id,f);e.target.value="";}}/>
+                  <button onClick={()=>toggleComments(iss.id)} style={{fontSize:11,padding:"2px 10px",background:"transparent",border:"1px solid #1E2540",borderRadius:6,color:commentCount>0?"#00D4FF":"#6B7290",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>
+                    {commentCount>0?`${commentCount} comment${commentCount!==1?"s":""}   ${isExpanded?"▲":"▼"}`:"Add Comment"}
+                  </button>
+                </div>
+                {/* Comment thread */}
+                {isExpanded&&(
+                  <div style={{marginTop:12,borderTop:"1px solid #1A2040",paddingTop:12}}>
+                    {(iss.comments||[]).map(c=>(
+                      <div key={c.id} style={{display:"flex",gap:10,marginBottom:10,alignItems:"flex-start"}}>
+                        <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(0,212,255,.1)",border:"1px solid rgba(0,212,255,.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#00D4FF",flexShrink:0,fontFamily:"'Syne'",fontWeight:700}}>U</div>
+                        <div style={{flex:1,background:"#0D1120",borderRadius:8,padding:"8px 12px"}}>
+                          <p style={{color:"#C0C6E0",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{c.content}</p>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6}}>
+                            <span style={{...s.mono10,color:"#4B5268"}}>{new Date(c.createdAt).toLocaleString()}</span>
+                            <button className="q-del" onClick={async()=>{if(await qConfirm("Delete comment?"))onDeleteComment(iss.id,c.id);}}>✕</button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{display:"flex",gap:8,marginTop:4}}>
+                      <textarea className="q-input" style={{flex:1,marginTop:0,height:60,resize:"vertical",fontSize:13}} value={commentText[iss.id]||""} onChange={e=>setComment(iss.id,e.target.value)} placeholder="Add a comment…" onKeyDown={e=>{if(e.ctrlKey&&e.key==="Enter"){e.preventDefault();submitComment(iss.id);}}}/>
+                      <button className="q-btn-primary" style={{alignSelf:"flex-end",padding:"8px 14px",fontSize:12}} onClick={()=>submitComment(iss.id)}>Post</button>
+                    </div>
+                    <p style={{...s.mono10,color:"#4B5268",marginTop:4}}>Ctrl+Enter to post</p>
+                  </div>
+                )}
               </div>
-              {iss.description&&<p style={{color:"#8B8FA8",fontSize:13,lineHeight:1.6,marginBottom:8}}>{iss.description}</p>}
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {PRIORITY_KEYS.map(pk=><button key={pk} onClick={()=>onUpdatePriority(iss.id,pk)} style={{fontSize:10,padding:"2px 8px",background:iss.priority===pk?PRIORITY_CONFIG[pk].bg:"transparent",border:`1px solid ${iss.priority===pk?PRIORITY_CONFIG[pk].color:"#1E2540"}`,borderRadius:12,color:iss.priority===pk?PRIORITY_CONFIG[pk].color:"#6B7290",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>{PRIORITY_CONFIG[pk].label}</button>)}
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12,borderColor:"rgba(74,222,128,.25)",color:"#4ADE80"}} onClick={()=>onFix(iss)}>Mark Fixed</button>
+                <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button>
               </div>
-              <div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>Logged {new Date(iss.createdAt).toLocaleDateString()}</div>
-            </div>
-            <div style={{display:"flex",gap:6,flexShrink:0}}>
-              <button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12,borderColor:"rgba(74,222,128,.25)",color:"#4ADE80"}} onClick={()=>onFix(iss)}>Mark Fixed</button>
-              <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button>
             </div>
           </div>
-        </div>
-      );})}
-      </div>}
+        );
+      })}</div>}
       {fixed.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Fixed ({fixed.length})</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{fixed.map(iss=>(<div key={iss.id} className="q-ms-row" style={{opacity:.55}}><span style={{width:8,height:8,borderRadius:"50%",background:"#4ADE80",flexShrink:0,marginTop:5}}/><div style={{flex:1}}><span style={{color:"#E8EAF6",fontSize:13,fontWeight:500,textDecoration:"line-through"}}>{iss.title}</span>{iss.fixDescription&&<p style={{color:"#6B7290",fontSize:12,marginTop:2}}>{iss.fixDescription}</p>}<div style={{...s.mono10,marginTop:3,color:"#2E3558"}}>{iss.fixedAt?new Date(iss.fixedAt).toLocaleDateString():""}</div></div><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button></div>))}</div></>}
     </div>
   );
 }
+
 
 // ── Ideas Tab ─────────────────────────────────────────────────────────────────
 function IdeasTab({project,onAdd,onEdit,onPin,onDelete,onReorder}){
@@ -1593,6 +2021,190 @@ function ConceptCard({concept,onDelete,onLightbox}){
       {isCode&&<pre style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"#B8BDD4",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#0A0E1A",padding:10,borderRadius:6,maxHeight:160,overflow:"auto",margin:0}}>{concept.content}</pre>}
       {isLink&&<a href={concept.content} target="_blank" rel="noreferrer" style={{...s.fileLink,display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>↗ {concept.content}</a>}
       {!isColor&&!isImage&&!isAudio&&!isCode&&!isLink&&<p style={{color:"#B8BDD4",fontSize:13,lineHeight:1.65,whiteSpace:"pre-wrap"}}>{concept.content}</p>}
+    </div>
+  );
+}
+
+// ── Sprints Tab ───────────────────────────────────────────────────────────────
+function SprintsTab({project,onAdd,onUpdateStatus,onDelete,onAssignTodo}){
+  const sprints=project.sprints||[];
+  const todos=project.todos||[];
+  const active=sprints.filter(sp=>sp.status==="active");
+  const completed=sprints.filter(sp=>sp.status==="completed");
+
+  return(
+    <div>
+      <div style={s.tabBar}>
+        <span style={s.mono12}>{active.length} active · {completed.length} completed</span>
+        <button className="q-btn-primary" onClick={onAdd}>+ New Sprint</button>
+      </div>
+      {sprints.length===0&&<div style={s.empty}><p>No sprints yet. Create one to group todos into focused cycles.</p></div>}
+      {active.length>0&&<div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:24}}>
+        {active.map(sp=>{
+          const spTodos=todos.filter(t=>t.sprintId===sp.id);
+          const done=spTodos.filter(t=>t.completed).length;
+          const pct=spTodos.length?Math.round(done/spTodos.length*100):0;
+          const daysLeft=sp.endDate?Math.ceil((new Date(sp.endDate)-new Date())/(1000*60*60*24)):null;
+          return(
+            <div key={sp.id} className="q-ver-card" style={{borderLeft:"3px solid #B47FFF"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                <div>
+                  <span style={{fontFamily:"'Syne'",fontSize:16,fontWeight:700,color:"#E8EAF6"}}>{sp.name}</span>
+                  {sp.goal&&<p style={{color:"#8B8FA8",fontSize:13,marginTop:3}}>{sp.goal}</p>}
+                  {(sp.startDate||sp.endDate)&&<div style={{display:"flex",gap:12,marginTop:6}}>
+                    {sp.startDate&&<span style={s.mono10}>{new Date(sp.startDate).toLocaleDateString()}</span>}
+                    {sp.endDate&&<span style={s.mono10}>→ {new Date(sp.endDate).toLocaleDateString()}</span>}
+                    {daysLeft!==null&&<span style={{...s.mono10,color:daysLeft<3?"#FF6B9D":daysLeft<7?"#FFB347":"#6B7290"}}>{daysLeft>0?`${daysLeft}d left`:"Past due"}</span>}
+                  </div>}
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12,color:"#4ADE80",borderColor:"rgba(74,222,128,.25)"}} onClick={()=>onUpdateStatus(sp.id,"completed")}>Complete</button>
+                  <button className="q-del" onClick={async()=>{if(await qConfirm(`Delete sprint "${sp.name}"?`))onDelete(sp.id);}}>✕</button>
+                </div>
+              </div>
+              {spTodos.length>0&&<>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                  <div style={s.bar}><div style={{...s.barFill,width:`${pct}%`}}/></div>
+                  <span style={s.mono10}>{done}/{spTodos.length}</span>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                  {spTodos.slice(0,6).map(t=>(
+                    <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0"}}>
+                      <span style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${t.completed?"#4ADE80":"#2A3050"}`,background:t.completed?"rgba(74,222,128,.1)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"#4ADE80",flexShrink:0}}>{t.completed&&"✓"}</span>
+                      <span style={{fontSize:13,color:t.completed?"#6B7290":"#C0C6E0",textDecoration:t.completed?"line-through":"none",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.text}</span>
+                      <span style={{fontSize:10,color:PRIORITY_CONFIG[t.priority||"medium"].color}}>{PRIORITY_CONFIG[t.priority||"medium"].icon}</span>
+                    </div>
+                  ))}
+                  {spTodos.length>6&&<p style={{...s.mono10,color:"#4B5268",marginTop:4}}>+{spTodos.length-6} more — see To-Do tab</p>}
+                </div>
+              </>}
+              {spTodos.length===0&&<p style={{...s.mono10,color:"#4B5268"}}>No tasks assigned. Add tasks in the To-Do tab.</p>}
+            </div>
+          );
+        })}
+      </div>}
+      {completed.length>0&&<>
+        <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Completed ({completed.length})</div>
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {completed.map(sp=>{
+            const spTodos=todos.filter(t=>t.sprintId===sp.id);
+            const done=spTodos.filter(t=>t.completed).length;
+            return(
+              <div key={sp.id} className="q-ms-row" style={{opacity:.55}}>
+                <div style={{flex:1}}><span style={{color:"#E8EAF6",fontWeight:500}}>{sp.name}</span><span style={{...s.mono10,marginLeft:10}}>{done}/{spTodos.length} tasks</span></div>
+                <button className="q-btn-ghost" style={{padding:"3px 10px",fontSize:11}} onClick={()=>onUpdateStatus(sp.id,"active")}>Reopen</button>
+                <button className="q-del" onClick={async()=>{if(await qConfirm(`Delete sprint "${sp.name}"?`))onDelete(sp.id);}}>✕</button>
+              </div>
+            );
+          })}
+        </div>
+      </>}
+    </div>
+  );
+}
+
+// ── Time Tab ──────────────────────────────────────────────────────────────────
+function TimeTab({project,onStart,onStop,onDelete}){
+  const sessions=project.timeSessions||[];
+  const [running,setRunning]=useState(null); // {id, startedAt}
+  const [elapsed,setElapsed]=useState(0);
+  const [stopNote,setStopNote]=useState("");
+
+  // Detect any open session (no endedAt)
+  const openSession=sessions.find(s=>!s.endedAt);
+  useEffect(()=>{
+    if(openSession){setRunning({id:openSession.id,startedAt:openSession.startedAt});}
+    else{setRunning(null);setElapsed(0);}
+  },[openSession?.id]);
+
+  useEffect(()=>{
+    if(!running)return;
+    const iv=setInterval(()=>setElapsed(Math.round((Date.now()-new Date(running.startedAt))/1000)),500);
+    return()=>clearInterval(iv);
+  },[running]);
+
+  const totalSeconds=sessions.filter(s=>s.durationSeconds).reduce((a,s)=>a+s.durationSeconds,0);
+  const today=new Date().toDateString();
+  const todaySeconds=sessions.filter(s=>s.durationSeconds&&new Date(s.startedAt).toDateString()===today).reduce((a,s)=>a+s.durationSeconds,0);
+
+  const handleStop=async()=>{
+    if(!running)return;
+    await onStop(running.id,stopNote);
+    setStopNote("");setRunning(null);setElapsed(0);
+  };
+
+  const grouped=sessions.filter(s=>s.endedAt).reduce((acc,s)=>{
+    const d=new Date(s.startedAt).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+    if(!acc[d])acc[d]=[];acc[d].push(s);return acc;
+  },{});
+
+  return(
+    <div>
+      <div style={s.tabBar}><span style={s.mono12}>Total: {fmtDuration(totalSeconds)} · Today: {fmtDuration(todaySeconds)}</span></div>
+
+      {/* Timer card */}
+      <div className="q-ver-card" style={{marginBottom:20,borderLeft:`3px solid ${running?"#4ADE80":"#1E2540"}`}}>
+        <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+          <div style={{fontFamily:"'JetBrains Mono'",fontSize:28,fontWeight:700,color:running?"#4ADE80":"#6B7290",letterSpacing:2,minWidth:90}}>
+            {running?fmtDurationLong(elapsed):"00:00:00"}
+          </div>
+          {!running?(
+            <button className="q-btn-primary" style={{padding:"10px 24px",fontSize:14}} onClick={onStart}>Start Timer</button>
+          ):(
+            <div style={{display:"flex",gap:8,flex:1,flexWrap:"wrap"}}>
+              <input className="q-input" style={{flex:1,minWidth:160,marginTop:0,fontSize:13}} value={stopNote} onChange={e=>setStopNote(e.target.value)} placeholder="What did you work on? (optional)"/>
+              <button className="q-btn-danger" style={{padding:"10px 18px",fontSize:13,borderColor:"#FF4466",color:"#FF7090"}} onClick={handleStop}>Stop</button>
+            </div>
+          )}
+        </div>
+        {running&&<p style={{...s.mono10,marginTop:10,color:"#4B5268"}}>Started {new Date(running.startedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>}
+      </div>
+
+      {/* Session history */}
+      {Object.keys(grouped).length===0?<div style={s.empty}><p>No sessions logged yet.</p></div>:(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          {Object.entries(grouped).map(([date,daySessions])=>{
+            const dayTotal=daySessions.reduce((a,s)=>a+(s.durationSeconds||0),0);
+            return(
+              <div key={date}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <span style={{fontFamily:"'Syne'",fontWeight:700,color:"#C0C6E0",fontSize:13}}>{date}</span>
+                  <span style={{...s.mono10,color:"#6B7290"}}>{fmtDuration(dayTotal)}</span>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {daySessions.map(s=>(
+                    <div key={s.id} className="q-ms-row" style={{padding:"8px 10px"}}>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                          <span style={{fontFamily:"'JetBrains Mono'",fontSize:13,fontWeight:700,color:"#00D4FF"}}>{fmtDuration(s.durationSeconds)}</span>
+                          {s.note&&<span style={{fontSize:13,color:"#B8BDD4"}}>{s.note}</span>}
+                        </div>
+                        <p style={{...s.mono10,marginTop:3,color:"#4B5268"}}>{new Date(s.startedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} → {new Date(s.endedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>
+                      </div>
+                      <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this session?"))onDelete(s.id);}}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Sprint Form ───────────────────────────────────────────────────────────────
+function SprintForm({data,setData,onSubmit,onCancel}){
+  const set=(k,v)=>setData(d=>({...d,[k]:v}));
+  return(
+    <div>
+      <h2 style={s.modalTitle}>New Sprint</h2>
+      <Field label="Sprint Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., Sprint 1 — Auth & Onboarding" autoFocus/></Field>
+      <Field label="Goal"><textarea className="q-input" style={{height:72,resize:"vertical"}} value={data.goal||""} onChange={e=>set("goal",e.target.value)} placeholder="What does this sprint accomplish?"/></Field>
+      <Field label="Start Date"><input type="date" className="q-input" value={data.startDate||""} onChange={e=>set("startDate",e.target.value)}/></Field>
+      <Field label="End Date"><input type="date" className="q-input" value={data.endDate||""} onChange={e=>set("endDate",e.target.value)}/></Field>
+      <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&onSubmit(data)} submitLabel="Create Sprint"/>
     </div>
   );
 }
@@ -1735,47 +2347,92 @@ function DraggableList({items,onReorder,children}){
 }
 
 // ── Settings Modal ────────────────────────────────────────────────────────────
-function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,templates,onDeleteTemplate,onOpenTemplates}){
+function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,templates,onDeleteTemplate,onOpenTemplates,onCheckForUpdates,updateStatus,theme,accentColor,customStatuses,onSavePreferences}){
   const [order,setOrder]=useState(tabOrder);const[dragIdx,setDragIdx]=useState(null);
   const [newTagName,setNewTagName]=useState("");const[newTagColor,setNewTagColor]=useState("#00D4FF");
+  const [checking,setChecking]=useState(false);
+  const [localTheme,setLocalTheme]=useState(theme||"dark");
+  const [localAccent,setLocalAccent]=useState(accentColor||"#00D4FF");
+  const [localStatuses,setLocalStatuses]=useState({...customStatuses});
   const TAG_PRESET_COLORS=["#00D4FF","#4ADE80","#FFB347","#FF6B9D","#B47FFF","#FF4466","#8B8FA8","#6EB8D0"];
+  const ACCENT_PRESETS=["#00D4FF","#4ADE80","#FFB347","#FF6B9D","#B47FFF","#F97316","#34D399","#60A5FA"];
   const onDragStart=i=>setDragIdx(i);
   const onDragOver=(e,i)=>{e.preventDefault();if(dragIdx===null||dragIdx===i)return;const n=[...order];const[m]=n.splice(dragIdx,1);n.splice(i,0,m);setOrder(n);setDragIdx(i);};
   const onDrop=()=>setDragIdx(null);
   const handleAddTag=async()=>{const name=newTagName.trim();if(!name)return;await onAddTag(name,newTagColor);setNewTagName("");};
+  const handleCheckUpdates=async()=>{setChecking(true);await onCheckForUpdates?.();setTimeout(()=>setChecking(false),3000);};
+  const isElectron=!!window.electronAPI?.checkForUpdates;
+
+  const handleSave=()=>{
+    onSavePreferences({theme:localTheme,accentColor:localAccent,customStatuses:localStatuses});
+    onSave(order);
+  };
+
   return(
     <div>
       <h2 style={s.modalTitle}>Settings</h2>
 
+      {/* Appearance */}
+      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Appearance</div>
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        {["dark","light"].map(t=>(
+          <button key={t} onClick={()=>setLocalTheme(t)} style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${localTheme===t?"var(--accent)":"var(--border-md)"}`,background:localTheme===t?"var(--accent-dim)":"transparent",color:localTheme===t?"var(--accent)":"var(--txt-muted)",fontFamily:"'Syne'",fontWeight:600,fontSize:13,cursor:"pointer",transition:"all .15s",textTransform:"capitalize"}}>
+            {t==="dark"?"Dark Mode":"Light Mode"}
+          </button>
+        ))}
+      </div>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:11,color:"var(--txt-muted)",fontWeight:700,letterSpacing:".5px",textTransform:"uppercase",marginBottom:8}}>Accent Color</div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          {ACCENT_PRESETS.map(c=><button key={c} onClick={()=>setLocalAccent(c)} style={{width:26,height:26,borderRadius:"50%",background:c,border:localAccent===c?"3px solid var(--txt)":"2px solid transparent",cursor:"pointer"}}/>)}
+          <input type="color" value={localAccent} onChange={e=>setLocalAccent(e.target.value)} style={{width:36,height:30,padding:2,background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:6,cursor:"pointer"}}/>
+          <span style={{...s.mono10,color:"var(--txt-faint)"}}>{localAccent}</span>
+        </div>
+      </div>
+
+      {/* Custom status labels */}
+      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Status Labels</div>
+      <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:20}}>
+        {Object.entries(STATUS_CONFIG).map(([key,val])=>(
+          <div key={key} style={{display:"flex",gap:8,alignItems:"center"}}>
+            <span style={{...s.badge,color:val.color,background:val.bg,minWidth:80,textAlign:"center"}}>{val.label}</span>
+            <span style={{...s.mono10,color:"var(--txt-faint)",width:14}}>→</span>
+            <input className="q-input" style={{flex:1,marginTop:0,fontSize:13}} value={localStatuses[key]||""} onChange={e=>setLocalStatuses(prev=>({...prev,[key]:e.target.value}))} placeholder={val.label}/>
+            {localStatuses[key]&&<button className="q-del" onClick={()=>setLocalStatuses(prev=>{const n={...prev};delete n[key];return n;})}>✕</button>}
+          </div>
+        ))}
+        <p style={{...s.mono10,color:"var(--txt-faint)",marginTop:4}}>Leave blank to use the default label. Syncs across devices.</p>
+      </div>
+
       {/* Tab order */}
-      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Tab Order — drag to rearrange</div>
+      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Tab Order — drag to rearrange</div>
       <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:20}}>
         {order.map((tab,i)=>(
           <div key={tab.key} draggable onDragStart={()=>onDragStart(i)} onDragOver={e=>onDragOver(e,i)} onDrop={onDrop} onDragEnd={onDrop}
-            style={{display:"flex",alignItems:"center",gap:12,padding:"9px 14px",background:dragIdx===i?"rgba(0,212,255,.04)":"#0D1120",border:"1px solid #1E2540",borderRadius:8,cursor:"grab",opacity:dragIdx===i?.4:1}}>
-            <span style={{color:"#3A4060",fontSize:16,userSelect:"none"}}>⠿</span>
-            <span style={{color:"#C0C6E0",fontFamily:"'Syne'",fontWeight:600,fontSize:14,flex:1}}>{tab.label}</span>
-            <span style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268"}}>{tab.key}</span>
+            style={{display:"flex",alignItems:"center",gap:12,padding:"9px 14px",background:dragIdx===i?"var(--accent-dim)":"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:8,cursor:"grab",opacity:dragIdx===i?.4:1}}>
+            <span style={{color:"var(--txt-dim)",fontSize:16,userSelect:"none"}}>⠿</span>
+            <span style={{color:"var(--txt)",fontFamily:"'Syne'",fontWeight:600,fontSize:14,flex:1}}>{tab.label}</span>
+            <span style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)"}}>{tab.key}</span>
           </div>
         ))}
       </div>
 
       {/* Tag management */}
-      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Tags</div>
+      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Tags</div>
       <div style={{display:"flex",gap:8,marginBottom:10}}>
         <input className="q-input" style={{flex:1,marginTop:0}} value={newTagName} onChange={e=>setNewTagName(e.target.value)} placeholder="New tag name…" onKeyDown={e=>e.key==="Enter"&&handleAddTag()}/>
-        <input type="color" value={newTagColor} onChange={e=>setNewTagColor(e.target.value)} style={{width:42,height:40,padding:2,background:"#0D1120",border:"1px solid #1E2540",borderRadius:8,cursor:"pointer",flexShrink:0}}/>
+        <input type="color" value={newTagColor} onChange={e=>setNewTagColor(e.target.value)} style={{width:42,height:40,padding:2,background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:8,cursor:"pointer",flexShrink:0}}/>
         <button className="q-btn-primary" style={{padding:"0 14px",flexShrink:0}} onClick={handleAddTag}>Add</button>
       </div>
       <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}}>
-        {TAG_PRESET_COLORS.map(c=><button key={c} onClick={()=>setNewTagColor(c)} style={{width:20,height:20,borderRadius:"50%",background:c,border:newTagColor===c?"2px solid #fff":"2px solid transparent",cursor:"pointer"}}/>)}
+        {TAG_PRESET_COLORS.map(c=><button key={c} onClick={()=>setNewTagColor(c)} style={{width:20,height:20,borderRadius:"50%",background:c,border:newTagColor===c?"2px solid var(--txt)":"2px solid transparent",cursor:"pointer"}}/>)}
       </div>
       {(userTags||[]).length>0&&(
         <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:16,marginTop:10}}>
           {(userTags||[]).map(t=>(
-            <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",background:"#0D1120",border:"1px solid #1E2540",borderRadius:8}}>
+            <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:8}}>
               <span style={{width:12,height:12,borderRadius:"50%",background:t.color,flexShrink:0}}/>
-              <span style={{color:"#C0C6E0",fontFamily:"'Syne'",fontWeight:600,fontSize:13,flex:1}}>{t.name}</span>
+              <span style={{color:"var(--txt)",fontFamily:"'Syne'",fontWeight:600,fontSize:13,flex:1}}>{t.name}</span>
               <button className="q-del" onClick={async()=>{if(await qConfirm(`Delete tag "${t.name}"?`))onDeleteTag(t.id);}}>✕</button>
             </div>
           ))}
@@ -1783,16 +2440,38 @@ function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,t
       )}
 
       {/* Templates */}
-      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Project Templates</div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",background:"#0D1120",border:"1px solid #1E2540",borderRadius:8,marginBottom:20}}>
-        <span style={{color:"#C0C6E0",fontSize:13}}>{templates?.length||0} saved {templates?.length===1?"template":"templates"}</span>
+      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Project Templates</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:8,marginBottom:20}}>
+        <span style={{color:"var(--txt)",fontSize:13}}>{templates?.length||0} saved {templates?.length===1?"template":"templates"}</span>
         <button className="q-btn-ghost" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{onCancel();onOpenTemplates&&onOpenTemplates();}}>Manage →</button>
       </div>
 
-      <div style={{padding:"10px 14px",background:"rgba(0,212,255,.04)",borderRadius:8,border:"1px solid rgba(0,212,255,.08)",marginBottom:4}}>
-        <p style={{fontSize:12,color:"#6B7290",lineHeight:1.6}}>Tab order syncs across devices. Tags can be assigned in Edit Project.<br/>Shortcuts: <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>Ctrl+←/→</span> tabs · <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>Ctrl+↑↓</span> projects · <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>Ctrl+Enter</span> submit · <span style={{fontFamily:"'JetBrains Mono'",color:"#8B8FA8"}}>F5</span> refresh</p>
+      {/* Updates */}
+      {isElectron&&(
+        <div style={{marginBottom:20}}>
+          <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Updates</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",background:"var(--bg-input)",border:`1px solid ${updateStatus==="ready"?"#4ADE80":updateStatus==="available"?"var(--accent)":"var(--border-md)"}`,borderRadius:8}}>
+            <div>
+              <span style={{color:"var(--txt)",fontSize:13,fontFamily:"'Syne'",fontWeight:600}}>
+                {updateStatus==="ready"?"Update ready to install"
+                :updateStatus==="available"?"Downloading update…"
+                :updateStatus==="checking"?"Checking for updates…"
+                :"Qoder "+APP_VER}
+              </span>
+              {!updateStatus&&<p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",marginTop:3}}>Up to date</p>}
+            </div>
+            {updateStatus==="ready"
+              ?<button className="q-btn-primary" style={{padding:"7px 14px",fontSize:12}} onClick={()=>window.electronAPI.installUpdate()}>Restart & Install</button>
+              :<button className="q-btn-ghost" style={{padding:"7px 14px",fontSize:12,opacity:checking||updateStatus==="available"?.5:1}} disabled={checking||updateStatus==="available"} onClick={handleCheckUpdates}>{checking?"Checking…":"Check for Updates"}</button>
+            }
+          </div>
+        </div>
+      )}
+
+      <div style={{padding:"10px 14px",background:"var(--accent-dim)",borderRadius:8,border:"1px solid var(--accent-border)",marginBottom:4}}>
+        <p style={{fontSize:12,color:"var(--txt-muted)",lineHeight:1.6}}>All settings sync across devices.<br/>Shortcuts: <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>Ctrl+←/→</span> tabs · <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>Ctrl+↑↓</span> projects · <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>Ctrl+Enter</span> submit · <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>F5</span> refresh</p>
       </div>
-      <FormActions onCancel={onCancel} onSubmit={()=>onSave(order)} submitLabel="Save Settings"/>
+      <FormActions onCancel={onCancel} onSubmit={handleSave} submitLabel="Save Settings"/>
     </div>
   );
 }
@@ -1835,6 +2514,16 @@ function ProjectForm({data,setData,title,userTags,templates,onSubmit,onCancel}){
         <div style={{display:"flex",gap:8}}><input className="q-input" style={{flex:1,fontFamily:"'JetBrains Mono'",fontSize:12}} value={data.localFolder||""} onChange={e=>set("localFolder",e.target.value)} placeholder="Folder path…"/>{isElectron&&<button className="q-btn-ghost" style={{flexShrink:0,marginTop:6}} onClick={browseFolder}>Browse</button>}</div>
       </Field>
       <Field label="Tech Stack"><div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>{TECH_TAGS.map(t=><button key={t} className={`q-chip${(data.techStack||[]).includes(t)?" q-chip-on":""}`} onClick={()=>tog(t)}>{t}</button>)}</div></Field>
+      <Field label="Project Color">
+        <div style={{display:"flex",gap:8,marginTop:8,alignItems:"center",flexWrap:"wrap"}}>
+          <button onClick={()=>set("color",null)} style={{width:24,height:24,borderRadius:"50%",background:"var(--bg-card)",border:!data.color?"2px solid var(--accent)":"2px solid var(--border-md)",cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--txt-muted)"}}>×</button>
+          {PROJECT_COLORS.filter(c=>c).map(c=>(
+            <button key={c} onClick={()=>set("color",c)} style={{width:24,height:24,borderRadius:"50%",background:c,border:data.color===c?"3px solid var(--txt)":"2px solid transparent",cursor:"pointer"}}/>
+          ))}
+          <input type="color" value={data.color||"#00D4FF"} onChange={e=>set("color",e.target.value)} style={{width:36,height:30,padding:2,background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:6,cursor:"pointer"}}/>
+        </div>
+        <p style={{...s.mono10,marginTop:6,color:"var(--txt-faint)"}}>Shows as colored dot in the sidebar</p>
+      </Field>
       <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&onSubmit(data)} submitLabel={title==="Edit Project"?"Save Changes":"Create Project"}/>
     </div>
   );
@@ -2110,12 +2799,31 @@ function ManageTemplatesModal({templates,onDelete,onApply,onCancel}){
 }
 
 // ── Changelog Modal ───────────────────────────────────────────────────────────
-function ChangelogModal({project,onClose}){
+function ChangelogModal({project,onClose,onPublishRelease}){
   const [copied,setCopied]=useState(false);
+  const [ghToken,setGhToken]=useState(()=>{try{return localStorage.getItem("q-gh-token")||"";}catch{return "";}});
+  const [publishing,setPublishing]=useState(false);
+  const [publishedUrl,setPublishedUrl]=useState(null);
+  const [draft,setDraft]=useState(false);
+  const [showToken,setShowToken]=useState(false);
   const md=generateChangelog(project);
-  const copy=()=>{
-    navigator.clipboard.writeText(md).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2000);}).catch(()=>{});
+  const latestVer=project.versions?.[0];
+  const repo=parseGitHubRepo(project.gitUrl);
+
+  const copy=()=>{navigator.clipboard.writeText(md).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2000);}).catch(()=>{});};
+
+  const saveToken=(val)=>{setGhToken(val);try{if(val)localStorage.setItem("q-gh-token",val);else localStorage.removeItem("q-gh-token");}catch{}};
+
+  const handlePublish=async()=>{
+    if(!latestVer){return;}
+    setPublishing(true);
+    const tagName=`v${latestVer.version}`.replace(/^vv/,"v");
+    const releaseName=`${project.name} ${tagName}`;
+    const url=await onPublishRelease(tagName,releaseName,md,ghToken,draft);
+    if(url)setPublishedUrl(url);
+    setPublishing(false);
   };
+
   return(
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
@@ -2125,11 +2833,54 @@ function ChangelogModal({project,onClose}){
           <button className="q-btn-ghost" style={{padding:"7px 12px",fontSize:12}} onClick={onClose}>✕</button>
         </div>
       </div>
-      <div style={{background:"#0A0E1A",border:"1px solid #1A2040",borderRadius:10,padding:18,maxHeight:"60vh",overflowY:"auto"}}>
+
+      {/* Generated changelog */}
+      <div style={{background:"#0A0E1A",border:"1px solid #1A2040",borderRadius:10,padding:18,maxHeight:"40vh",overflowY:"auto",marginBottom:16}}>
         <pre style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#B8BDD4",whiteSpace:"pre-wrap",lineHeight:1.7,margin:0}}>{md}</pre>
       </div>
-      <p style={{...s.mono10,color:"#4B5268",marginTop:10}}>
-        {project.versions?.length||0} versions · {project.issues?.filter(i=>i.status==="fixed").length||0} fixed issues included
+
+      {/* GitHub Release publisher */}
+      {repo?(
+        <div style={{background:"rgba(0,212,255,.04)",border:"1px solid rgba(0,212,255,.12)",borderRadius:10,padding:16}}>
+          <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#00D4FF",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:12}}>Publish to GitHub Release</div>
+
+          {publishedUrl?(
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{color:"#4ADE80",fontSize:13,fontWeight:600}}>✓ Release published!</span>
+              <a href={publishedUrl} target="_blank" rel="noreferrer" style={{...s.fileLink,fontSize:12}}>View on GitHub →</a>
+              <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>setPublishedUrl(null)}>Publish Another</button>
+            </div>
+          ):(
+            <>
+              <div style={{marginBottom:10}}>
+                <label style={{display:"block",fontSize:11,color:"#6B7290",fontWeight:700,letterSpacing:".5px",textTransform:"uppercase",marginBottom:6}}>GitHub Token (with Contents: Write)</label>
+                <div style={{display:"flex",gap:8}}>
+                  <input className="q-input" type={showToken?"text":"password"} style={{flex:1,marginTop:0,fontFamily:"'JetBrains Mono'",fontSize:12}} value={ghToken} onChange={e=>saveToken(e.target.value)} placeholder="ghp_xxxxxxxxxxxx"/>
+                  <button className="q-btn-ghost" style={{padding:"0 12px",fontSize:12}} onClick={()=>setShowToken(v=>!v)}>{showToken?"Hide":"Show"}</button>
+                </div>
+                <p style={{...s.mono10,marginTop:5,color:"#4B5268"}}>Saved locally on this device. Tag: {latestVer?`v${latestVer.version}`:"no versions yet"} · Repo: {repo.owner}/{repo.repo}</p>
+              </div>
+              <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,color:"#8B8FA8"}}>
+                  <input type="checkbox" checked={draft} onChange={e=>setDraft(e.target.checked)} style={{accentColor:"#00D4FF"}}/>
+                  Save as draft
+                </label>
+                <button className="q-btn-primary" style={{padding:"8px 18px",fontSize:13,opacity:publishing||!latestVer||!ghToken?.trim()?.length?.5:1}} disabled={publishing||!latestVer||!ghToken?.trim()} onClick={handlePublish}>
+                  {publishing?"Publishing…":draft?"Create Draft Release":"Publish Release"}
+                </button>
+                {!latestVer&&<span style={{...s.mono10,color:"#FF6B9D"}}>Log a version first</span>}
+              </div>
+            </>
+          )}
+        </div>
+      ):(
+        <div style={{padding:"10px 14px",background:"rgba(255,107,157,.05)",border:"1px solid rgba(255,107,157,.15)",borderRadius:8}}>
+          <p style={{fontSize:12,color:"#FF6B9D"}}>Add a GitHub URL in Edit Project to enable one-click release publishing.</p>
+        </div>
+      )}
+
+      <p style={{...s.mono10,color:"#4B5268",marginTop:12}}>
+        {project.versions?.length||0} versions · {project.issues?.filter(i=>i.status==="fixed").length||0} fixed issues
       </p>
     </div>
   );
@@ -2194,86 +2945,86 @@ const css=`
 
   /* Tab bar with scroll arrows */
   .q-tab-bar-wrap{position:relative;margin-bottom:22px;}
-  .q-tab-bar{display:flex;border-bottom:1px solid #1A2040;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+  .q-tab-bar{display:flex;border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
   .q-tab-bar::-webkit-scrollbar{display:none;}
   .q-tab-arrow{position:absolute;top:0;bottom:1px;width:30px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;font-size:14px;z-index:2;transition:all .15s;}
   .q-tab-arrow:hover{color:#00D4FF;}
-  .q-tab-arrow-left{left:0;color:#6B7290;background:linear-gradient(to right,#0A0E1A 55%,transparent);}
-  .q-tab-arrow-right{right:0;color:#6B7290;background:linear-gradient(to left,#0A0E1A 55%,transparent);}
+  .q-tab-arrow-left{left:0;color:var(--txt-muted);background:linear-gradient(to right,var(--bg) 55%,transparent);}
+  .q-tab-arrow-right{right:0;color:var(--txt-muted);background:linear-gradient(to left,var(--bg) 55%,transparent);}
 
-  .q-nav{display:flex;align-items:center;padding:8px 14px;color:#8B8FA8;font-family:'Syne',sans-serif;font-weight:500;width:calc(100% - 16px);margin:1px 8px;border-radius:7px;cursor:pointer;transition:all .15s;user-select:none;font-size:14px;}
-  .q-nav:hover{background:rgba(0,212,255,.06);color:#D0D3E8;}
-  .q-nav-active{background:rgba(0,212,255,.09)!important;color:#00D4FF!important;}
+  .q-nav{display:flex;align-items:center;padding:8px 14px;color:var(--txt-muted);font-family:'Syne',sans-serif;font-weight:500;width:calc(100% - 16px);margin:1px 8px;border-radius:7px;cursor:pointer;transition:all .15s;user-select:none;font-size:14px;}
+  .q-nav:hover{background:var(--accent-dim);color:var(--txt);}
+  .q-nav-active{background:var(--accent-dim)!important;color:var(--accent)!important;}
   .q-folder-btn{margin-left:4px;opacity:0;transition:opacity .15s;padding:3px 4px;border-radius:4px;flex-shrink:0;display:flex;align-items:center;background:none;border:none;cursor:pointer;}
   .q-nav:hover .q-folder-btn,.q-nav-active .q-folder-btn{opacity:1;}
 
-  .q-proj-link{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.18);border-radius:6px;color:#00D4FF;font-size:12px;font-family:'Syne';font-weight:600;transition:all .15s;}
+  .q-proj-link{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;background:var(--accent-dim);border:1px solid var(--accent-border);border-radius:6px;color:var(--accent);font-size:12px;font-family:'Syne';font-weight:600;transition:all .15s;}
   .q-proj-link:hover{background:rgba(0,212,255,.12);border-color:rgba(0,212,255,.35);}
 
-  .q-btn-primary{padding:9px 18px;background:#00D4FF;color:#06090F;border-radius:8px;font-size:14px;font-weight:700;font-family:'Syne',sans-serif;transition:opacity .15s;}.q-btn-primary:hover{opacity:.88;}
-  .q-btn-ghost{padding:9px 14px;border:1px solid #1E2540;border-radius:8px;color:#8B8FA8;font-size:14px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-ghost:hover{border-color:#2E3560;color:#C0C6E0;}
-  .q-btn-danger{padding:9px 14px;border:1px solid #1E2540;border-radius:8px;color:#8B8FA8;font-size:14px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-danger:hover{border-color:#FF4466;color:#FF4466;}
-  .q-btn-new{width:100%;padding:10px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.2);border-radius:8px;color:#00D4FF;font-size:14px;font-weight:600;font-family:'Syne',sans-serif;transition:all .15s;}.q-btn-new:hover{background:rgba(0,212,255,.14);border-color:rgba(0,212,255,.35);}
-  .q-sign-out{color:#4B5268;font-size:16px;padding:7px 10px;border:1px solid #1A2040;border-radius:8px;transition:all .15s;}.q-sign-out:hover{color:#FF6B9D;border-color:#FF4466;}
-  .q-icon-btn{color:#8B8FA8;font-size:14px;padding:7px 10px;border:1px solid #1A2040;border-radius:8px;transition:all .15s;font-family:'Syne';font-weight:600;}.q-icon-btn:hover{color:#E8EAF6;border-color:#2E3560;background:rgba(255,255,255,.03);}
-  .q-input{width:100%;background:#0D1120;border:1px solid #1E2540;border-radius:8px;padding:10px 13px;color:#E8EAF6;font-size:14px;font-family:'Syne',sans-serif;transition:border-color .15s;margin-top:6px;}.q-input:focus{border-color:rgba(0,212,255,.4);}
+  .q-btn-primary{padding:9px 18px;background:var(--accent);color:#06090F;border-radius:8px;font-size:14px;font-weight:700;font-family:'Syne',sans-serif;transition:opacity .15s;}.q-btn-primary:hover{opacity:.88;}
+  .q-btn-ghost{padding:9px 14px;border:1px solid var(--border-md);border-radius:8px;color:var(--txt-muted);font-size:14px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-ghost:hover{border-color:var(--txt-dim);color:var(--txt);}
+  .q-btn-danger{padding:9px 14px;border:1px solid var(--border-md);border-radius:8px;color:var(--txt-muted);font-size:14px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-danger:hover{border-color:#FF4466;color:#FF4466;}
+  .q-btn-new{width:100%;padding:10px;background:var(--accent-dim);border:1px solid var(--accent-border);border-radius:8px;color:var(--accent);font-size:14px;font-weight:600;font-family:'Syne',sans-serif;transition:all .15s;}.q-btn-new:hover{background:rgba(0,212,255,.14);border-color:rgba(0,212,255,.35);}
+  .q-sign-out{color:var(--txt-faint);font-size:16px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;transition:all .15s;}.q-sign-out:hover{color:#FF6B9D;border-color:#FF4466;}
+  .q-icon-btn{color:var(--txt-sub);font-size:14px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;transition:all .15s;font-family:'Syne';font-weight:600;}.q-icon-btn:hover{color:#E8EAF6;border-color:#2E3560;background:rgba(255,255,255,.03);}
+  .q-input{width:100%;background:var(--bg-input);border:1px solid var(--border-md);border-radius:8px;padding:10px 13px;color:var(--txt);font-size:14px;font-family:'Syne',sans-serif;transition:border-color .15s;margin-top:6px;}.q-input:focus{border-color:var(--accent);}
   .q-mono{font-family:'JetBrains Mono',monospace!important;}
-  .q-chip{padding:5px 11px;background:#111627;border:1px solid #1E2540;border-radius:20px;color:#6B7290;font-size:12px;font-family:'Syne',sans-serif;transition:all .15s;}.q-chip:hover{border-color:rgba(0,212,255,.3);color:#C0C6E0;}.q-chip-on{background:rgba(0,212,255,.1)!important;border-color:rgba(0,212,255,.35)!important;color:#00D4FF!important;}
-  .q-card{background:#111627;border:1px solid #1A2040;border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;}.q-card:hover{border-color:rgba(0,212,255,.28);transform:translateY(-2px);background:#131929;}
-  .q-ver-card{background:#111627;border:1px solid #1A2040;border-radius:10px;padding:18px 20px;transition:border-color .2s;}.q-ver-card:hover{border-color:rgba(0,212,255,.2);}
-  .q-ms-row{display:flex;align-items:flex-start;gap:12px;padding:10px 8px;border-radius:8px;transition:background .15s;}.q-ms-row:hover{background:rgba(255,255,255,.025);}
+  .q-chip{padding:5px 11px;background:var(--bg-card);border:1px solid var(--border-md);border-radius:20px;color:var(--txt-muted);font-size:12px;font-family:'Syne',sans-serif;transition:all .15s;}.q-chip:hover{border-color:var(--accent-border);color:var(--txt);}.q-chip-on{background:var(--accent-dim)!important;border-color:var(--accent)!important;color:var(--accent)!important;}
+  .q-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;}.q-card:hover{border-color:var(--accent-border);transform:translateY(-2px);background:var(--bg-card);}
+  .q-ver-card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:18px 20px;transition:border-color .2s;}.q-ver-card:hover{border-color:var(--accent-border);}
+  .q-ms-row{display:flex;align-items:flex-start;gap:12px;padding:10px 8px;border-radius:8px;transition:background .15s;}.q-ms-row:hover{background:rgba(0,0,0,.04);}
   .q-check{width:22px;height:22px;min-width:22px;border:2px solid #2A3050;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#4ADE80;margin-top:1px;transition:all .15s;flex-shrink:0;}.q-check:hover{border-color:#4ADE80;}.q-check-done{background:rgba(74,222,128,.1);border-color:#4ADE80;}
   .q-del{color:#3A3F58;font-size:13px;padding:3px 5px;transition:color .15s;flex-shrink:0;}.q-del:hover{color:#FF4466;}
-  .q-tab{padding:10px 18px;color:#6B7290;font-size:13px;font-weight:500;font-family:'Syne',sans-serif;border-bottom:2px solid transparent;border-top:none;border-left:none;border-right:none;background:none;margin-bottom:-1px;display:inline-flex;align-items:center;gap:5px;transition:all .15s;white-space:nowrap;}.q-tab:hover{color:#C0C6E0;}.q-tab-on{color:#00D4FF!important;border-bottom-color:#00D4FF!important;}
+  .q-tab{padding:10px 18px;color:var(--txt-muted);font-size:13px;font-weight:500;font-family:'Syne',sans-serif;border-bottom:2px solid transparent;border-top:none;border-left:none;border-right:none;background:none;margin-bottom:-1px;display:inline-flex;align-items:center;gap:5px;transition:all .15s;white-space:nowrap;}.q-tab:hover{color:var(--txt);}.q-tab-on{color:var(--accent)!important;border-bottom-color:var(--accent)!important;}
   .q-modal-submit{}
 `;
 
 const s={
-  root:{display:"flex",minHeight:"100vh",background:"#0A0E1A",fontFamily:"'Syne',sans-serif",color:"#E8EAF6"},
-  sidebar:{background:"#0C1020",borderRight:"1px solid #151C32",display:"flex",flexDirection:"column",top:0,height:"100vh",overflowY:"auto",position:"relative",flexShrink:0},
-  logo:{padding:"20px 16px 16px",borderBottom:"1px solid #151C32",display:"flex",alignItems:"baseline",gap:3,marginBottom:8},
-  logoQ:{fontFamily:"'Syne'",fontSize:26,fontWeight:800,color:"#00D4FF",lineHeight:1},
-  logoText:{fontFamily:"'Syne'",fontSize:20,fontWeight:700,color:"#E8EAF6",letterSpacing:"-.5px"},
-  logoBeta:{fontFamily:"'JetBrains Mono'",fontSize:9,color:"#3A4060",marginLeft:4,letterSpacing:1.5,fontWeight:700},
-  closeSidebar:{marginLeft:"auto",color:"#4B5268",fontSize:16,padding:"0 4px",background:"none",border:"none",cursor:"pointer"},
+  root:{display:"flex",minHeight:"100vh",background:"var(--bg)",fontFamily:"'Syne',sans-serif",color:"var(--txt)"},
+  sidebar:{background:"var(--bg-side)",borderRight:"1px solid var(--border-lg)",display:"flex",flexDirection:"column",top:0,height:"100vh",overflowY:"auto",position:"relative",flexShrink:0},
+  logo:{padding:"20px 16px 16px",borderBottom:"1px solid var(--border-lg)",display:"flex",alignItems:"baseline",gap:3,marginBottom:8},
+  logoQ:{fontFamily:"'Syne'",fontSize:26,fontWeight:800,color:"var(--accent)",lineHeight:1},
+  logoText:{fontFamily:"'Syne'",fontSize:20,fontWeight:700,color:"var(--txt)",letterSpacing:"-.5px"},
+  logoBeta:{fontFamily:"'JetBrains Mono'",fontSize:9,color:"var(--txt-dim)",marginLeft:4,letterSpacing:1.5,fontWeight:700},
+  closeSidebar:{marginLeft:"auto",color:"var(--txt-faint)",fontSize:16,padding:"0 4px",background:"none",border:"none",cursor:"pointer"},
   nav:{flex:1,padding:"4px 0",overflowY:"auto"},
-  navSection:{fontSize:11,fontWeight:700,letterSpacing:"1.5px",color:"#2E3558",padding:"14px 20px 5px",textTransform:"uppercase"},
-  sidebarFoot:{padding:14,borderTop:"1px solid #151C32"},
+  navSection:{fontSize:11,fontWeight:700,letterSpacing:"1.5px",color:"var(--txt-dim)",padding:"14px 20px 5px",textTransform:"uppercase"},
+  sidebarFoot:{padding:14,borderTop:"1px solid var(--border-lg)"},
   userRow:{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,gap:4},
-  userEmail:{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#2A304A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1},
+  userEmail:{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-ghost)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1},
   mobileOverlay:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:199},
-  mobileHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"#0C1020",borderBottom:"1px solid #151C32",position:"sticky",top:0,zIndex:10},
-  hamburger:{fontSize:20,color:"#8B8FA8",padding:"0 6px",width:32,background:"none",border:"none",cursor:"pointer"},
+  mobileHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"var(--bg-side)",borderBottom:"1px solid var(--border-lg)",position:"sticky",top:0,zIndex:10},
+  hamburger:{fontSize:20,color:"var(--txt-sub)",padding:"0 6px",width:32,background:"none",border:"none",cursor:"pointer"},
   main:{flex:1,overflowY:"auto",maxHeight:"100vh",minWidth:0},
-  page:{padding:"32px 40px"},  // no maxWidth — fills the full available space
+  page:{padding:"32px 40px"},
   pageHead:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:26},
-  pageTitle:{fontFamily:"'Syne'",fontSize:28,fontWeight:800,color:"#E8EAF6",letterSpacing:"-.5px"},
-  pageSub:{color:"#8B8FA8",fontSize:14,marginTop:3},
+  pageTitle:{fontFamily:"'Syne'",fontSize:28,fontWeight:800,color:"var(--txt)",letterSpacing:"-.5px"},
+  pageSub:{color:"var(--txt-sub)",fontSize:14,marginTop:3},
   projHead:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16},
   statsGrid:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14},
-  statCard:{background:"#111627",border:"1px solid #1A2040",borderRadius:10,padding:"14px 16px"},
+  statCard:{background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,padding:"14px 16px"},
   statVal:{fontFamily:"'JetBrains Mono'",fontSize:28,fontWeight:700,lineHeight:1},
-  statLbl:{color:"#6B7290",fontSize:12,marginTop:5,fontWeight:500,letterSpacing:".3px"},
+  statLbl:{color:"var(--txt-muted)",fontSize:12,marginTop:5,fontWeight:500,letterSpacing:".3px"},
   grid:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:13},
-  empty:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14,padding:"48px 20px",color:"#6B7290",fontSize:15},
+  empty:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14,padding:"48px 20px",color:"var(--txt-muted)",fontSize:15},
   emptyIcon:{fontSize:44,opacity:.18},
   badge:{fontSize:11,fontWeight:600,padding:"3px 8px",borderRadius:4,fontFamily:"'JetBrains Mono'",letterSpacing:".3px"},
-  mono12:{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#6B7290"},
-  mono10:{fontFamily:"'JetBrains Mono'",fontSize:11,color:"#6B7290"},
-  techChip:{fontSize:11,padding:"3px 7px",background:"rgba(0,212,255,.05)",border:"1px solid rgba(0,212,255,.13)",borderRadius:4,color:"#6EB8D0",fontFamily:"'JetBrains Mono'"},
-  bar:{flex:1,height:4,background:"#1A2040",borderRadius:2,overflow:"hidden"},
-  barFill:{height:4,background:"linear-gradient(90deg,#00D4FF,#4ADE80)",borderRadius:2},
-  cardTitle:{fontFamily:"'Syne'",fontSize:16,fontWeight:700,marginBottom:6,color:"#E8EAF6"},
-  cardDesc:{fontSize:14,color:"#8B8FA8",lineHeight:1.5,marginBottom:12,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"},
-  tabPill:{fontSize:10,background:"rgba(0,212,255,.09)",color:"#00D4FF",padding:"1px 6px",borderRadius:10,fontFamily:"'JetBrains Mono'"},
+  mono12:{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--txt-muted)"},
+  mono10:{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-muted)"},
+  techChip:{fontSize:11,padding:"3px 7px",background:"var(--accent-dim)",border:"1px solid var(--accent-border)",borderRadius:4,color:"var(--accent)",fontFamily:"'JetBrains Mono'"},
+  bar:{flex:1,height:4,background:"var(--border)",borderRadius:2,overflow:"hidden"},
+  barFill:{height:4,background:"linear-gradient(90deg,var(--accent),#4ADE80)",borderRadius:2},
+  cardTitle:{fontFamily:"'Syne'",fontSize:16,fontWeight:700,marginBottom:6,color:"var(--txt)"},
+  cardDesc:{fontSize:14,color:"var(--txt-sub)",lineHeight:1.5,marginBottom:12,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"},
+  tabPill:{fontSize:10,background:"var(--accent-dim)",color:"var(--accent)",padding:"1px 6px",borderRadius:10,fontFamily:"'JetBrains Mono'"},
   tabBar:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16},
-  infoCard:{background:"#111627",border:"1px solid #1A2040",borderRadius:10,padding:"15px 17px"},
-  infoLbl:{fontSize:11,color:"#6B7290",fontWeight:700,letterSpacing:".8px",textTransform:"uppercase"},
-  fileLink:{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#00D4FF",background:"rgba(0,212,255,.06)",border:"1px solid rgba(0,212,255,.14)",borderRadius:4,padding:"4px 8px",display:"inline-block"},
+  infoCard:{background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,padding:"15px 17px"},
+  infoLbl:{fontSize:11,color:"var(--txt-muted)",fontWeight:700,letterSpacing:".8px",textTransform:"uppercase"},
+  fileLink:{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--accent)",background:"var(--accent-dim)",border:"1px solid var(--accent-border)",borderRadius:4,padding:"4px 8px",display:"inline-block"},
   overlayBackdrop:{position:"fixed",inset:0,background:"rgba(4,6,14,.88)",zIndex:1000},
-  modalCentered:{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1001,background:"#111627",border:"1px solid #1E2540",borderRadius:14,padding:26,width:"90%",maxWidth:560,maxHeight:"90vh",overflowY:"auto"},
-  modalTitle:{fontFamily:"'Syne'",fontSize:20,fontWeight:700,marginBottom:18,color:"#E8EAF6"},
-  fieldLbl:{display:"block",fontSize:11,fontWeight:700,color:"#6B7290",letterSpacing:".7px",textTransform:"uppercase",marginBottom:0},
-  authWrap:{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#0A0E1A",padding:20},
-  authBox:{width:"100%",maxWidth:420,background:"#0C1020",border:"1px solid #1A2040",borderRadius:16,padding:30},
+  modalCentered:{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1001,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:14,padding:26,width:"90%",maxWidth:560,maxHeight:"90vh",overflowY:"auto"},
+  modalTitle:{fontFamily:"'Syne'",fontSize:20,fontWeight:700,marginBottom:18,color:"var(--txt)"},
+  fieldLbl:{display:"block",fontSize:11,fontWeight:700,color:"var(--txt-muted)",letterSpacing:".7px",textTransform:"uppercase",marginBottom:0},
+  authWrap:{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"var(--bg)",padding:20},
+  authBox:{width:"100%",maxWidth:420,background:"var(--bg-side)",border:"1px solid var(--border)",borderRadius:16,padding:30},
 };
