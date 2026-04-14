@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.6.5";
+const APP_VER    = "v0.6.6";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -3428,22 +3428,31 @@ function Splash({msg}){return<div style={{display:"flex",alignItems:"center",jus
 const css=`
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500;700&display=swap');
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-  /* Android IME / Swype / Autocorrect fix for Capacitor WebView */
-  html,body,#root{-webkit-user-select:none;user-select:none;}
-  input,textarea{
-    outline:none;
-    -webkit-user-select:text!important;
-    user-select:text!important;
-    -webkit-touch-callout:default!important;
-    touch-action:manipulation;
-    /* These unlock the Android IME keyboard features */
+
+  /* ── Android IME / Swype fix ──────────────────────────────────────────────────
+     CRITICAL: Do NOT set user-select:none on html/body/root.
+     Android's IME compositor checks the root node's selectability before
+     enabling gesture typing (Swype). A global none blocks it even when
+     inputs override it. Instead we apply none only to specific UI elements. */
+  html,body,#root{
     -webkit-tap-highlight-color:transparent;
   }
-  select{outline:none;-webkit-user-select:text!important;user-select:text!important;}
-  /* Prevent WebView from eating key events that IME needs */
-  input[type="text"],input[type="email"],input[type="password"],input[type="search"],input[type="url"],textarea{
-    -webkit-user-modify:read-write-plaintext-only;
+
+  /* Inputs must be fully editable — no overrides, no !important battles */
+  input,textarea,select{
+    outline:none;
+    -webkit-user-select:text;
+    user-select:text;
+    touch-action:manipulation;
   }
+
+  /* Block selection only on interactive chrome, not the whole document */
+  button,nav,.q-nav,.q-tab,.q-chip,.q-check,.q-del,
+  .q-tab-bar,.q-btn-ghost,.q-btn-primary,.q-btn-danger,.q-btn-new{
+    -webkit-user-select:none;
+    user-select:none;
+  }
+
   ::-webkit-scrollbar{width:4px;height:4px;}::-webkit-scrollbar-track{background:var(--bg,#0A0E1A);}::-webkit-scrollbar-thumb{background:var(--scrollbar,#1E2540);border-radius:2px;}
   button{cursor:pointer;border:none;background:none;font-family:'Syne',sans-serif;}a{text-decoration:none;}
   audio{accent-color:#00D4FF;}
@@ -3457,7 +3466,7 @@ const css=`
   .q-tab-arrow-left{left:0;color:var(--txt-muted);background:linear-gradient(to right,var(--bg) 55%,transparent);}
   .q-tab-arrow-right{right:0;color:var(--txt-muted);background:linear-gradient(to left,var(--bg) 55%,transparent);}
 
-  .q-nav{display:flex;align-items:center;padding:8px 14px;color:var(--txt-muted);font-family:'Syne',sans-serif;font-weight:500;width:calc(100% - 16px);margin:1px 8px;border-radius:7px;cursor:pointer;transition:all .15s;user-select:none;font-size:14px;}
+  .q-nav{display:flex;align-items:center;padding:8px 14px;color:var(--txt-muted);font-family:'Syne',sans-serif;font-weight:500;width:calc(100% - 16px);margin:1px 8px;border-radius:7px;cursor:pointer;transition:all .15s;font-size:14px;}
   .q-nav:hover{background:var(--accent-dim);color:var(--txt);}
   .q-nav-active{background:var(--accent-dim)!important;color:var(--accent-text)!important;}
   .q-folder-btn{margin-left:4px;opacity:0;transition:opacity .15s;padding:3px 4px;border-radius:4px;flex-shrink:0;display:flex;align-items:center;background:none;border:none;cursor:pointer;}
