@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.6.6";
+const APP_VER    = "v0.6.7";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
