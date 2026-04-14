@@ -47,11 +47,10 @@ ipcMain.handle('open-html-in-browser', async (_, html) => {
 
 // Returns: { status: 'available'|'not-available'|'error', message? }
 ipcMain.handle('check-for-updates', async () => {
-  if (!autoUpdater) return { status: 'error', message: 'Updater not available (dev build)' };
-  if (isDev)        return { status: 'error', message: 'Updates disabled in development mode' };
+  if (!autoUpdater) return { status: 'error', message: 'Updater not available in dev mode' };
+  if (isDev)        return { status: 'error', message: 'Updates are disabled in development mode' };
   try {
     const result = await autoUpdater.checkForUpdates();
-    // result.updateInfo.version is the latest version on GitHub
     const latest  = result?.updateInfo?.version;
     const current = app.getVersion();
     if (latest && latest !== current) {
@@ -59,7 +58,19 @@ ipcMain.handle('check-for-updates', async () => {
     }
     return { status: 'not-available', version: current };
   } catch (err) {
-    return { status: 'error', message: err.message };
+    // Trim the raw error — electron-updater throws verbose objects
+    let msg = err.message || String(err);
+    if (msg.includes('404') || msg.includes('HttpError')) {
+      msg = 'No releases found on GitHub. Run "npm run electron:win" to publish your first release.';
+    } else if (msg.includes('ENOTFOUND') || msg.includes('network')) {
+      msg = 'No internet connection. Check your network and try again.';
+    } else if (msg.includes('token') || msg.includes('401') || msg.includes('403')) {
+      msg = 'GitHub authentication failed. Check that your GH_TOKEN is valid.';
+    } else {
+      // Keep only the first sentence of any other error
+      msg = msg.split('\n')[0].slice(0, 120);
+    }
+    return { status: 'error', message: msg };
   }
 });
 

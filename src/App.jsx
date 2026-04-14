@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.6.2";
+const APP_VER    = "v0.6.3";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -124,6 +124,9 @@ const THEMES = {
 function buildThemeCSS(themeName, accent="#00D4FF"){
   const t=THEMES[themeName]||THEMES.dark;
   const isLight=themeName==="light";
+  // In light mode, bright accents (cyan, yellow) need darkening for text legibility
+  // We compute a CSS filter trick by mapping to the accent but forcing dark text in light theme
+  const accentText=isLight?"var(--txt-sub)":accent; // light mode: use readable dark text instead
   return `
 :root {
   --bg:${t.bg}; --bg-side:${t.bgSide}; --bg-card:${t.bgCard};
@@ -131,7 +134,8 @@ function buildThemeCSS(themeName, accent="#00D4FF"){
   --border:${t.border}; --border-md:${t.borderMd}; --border-lg:${t.borderLg};
   --txt:${t.txt}; --txt-sub:${t.txtSub}; --txt-muted:${t.txtMuted};
   --txt-faint:${t.txtFaint}; --txt-dim:${t.txtDim}; --txt-ghost:${t.txtGhost};
-  --accent:${accent}; --accent-dim:${accent}1A; --accent-border:${accent}30;
+  --accent:${accent}; --accent-dim:${accent}18; --accent-border:${accent}35;
+  --accent-text:${accentText};
   --scrollbar:${isLight?"#A8B4CC":"#1E2540"};
   --shadow:${isLight?"0 1px 4px rgba(0,0,0,.10)":"none"};
   --overlay:${isLight?"rgba(60,70,100,.55)":"rgba(4,6,14,.88)"};
@@ -616,7 +620,8 @@ export default function QoderApp() {
   const [sidebarOpen,     setSidebarOpen]     = useState(false);
   const [sidebarWidth,    setSidebarWidth]    = useState(()=>{ try{return parseInt(localStorage.getItem("q-sidebar-w")||"240",10);}catch{return 240;} });
   const [sidebarCollapsed,setSidebarCollapsed]= useState(()=>{ try{return localStorage.getItem("q-sidebar-c")==="1";}catch{return false;} });
-  const [updateStatus,    setUpdateStatus]    = useState(null); // null | "available" | "downloading" | "ready"
+  const [updateStatus,    setUpdateStatus]    = useState(null); // null | "available" | "downloading" | "ready" | "current" | "error"
+  const [updateError,     setUpdateError]     = useState("");
   const [tabOrder,        setTabOrder]        = useState(DEFAULT_TABS);
   const [tagFilter,       setTagFilter]       = useState(null);
   const [lightbox,        setLightbox]        = useState(null);
@@ -704,7 +709,7 @@ export default function QoderApp() {
       if (!result) { setUpdateStatus(null); return; }
       if (result.status === "available")     { setUpdateStatus("available");  showToast(`Update v${result.version} downloading…`, "info"); }
       else if (result.status === "not-available") { setUpdateStatus("current"); setTimeout(()=>setUpdateStatus(s=>s==="current"?null:s), 4000); }
-      else if (result.status === "error")    { setUpdateStatus("error");     showToast(result.message||"Update check failed", "err"); setTimeout(()=>setUpdateStatus(null),5000); }
+      else if (result.status === "error")    { setUpdateError(result.message||"Update check failed"); setUpdateStatus("error"); setTimeout(()=>setUpdateStatus(null),8000); }
     } catch(e) {
       setUpdateStatus("error");
       showToast(e.message||"Update check failed", "err");
@@ -1530,7 +1535,7 @@ export default function QoderApp() {
         {modal==="add-concept"  &&<ConceptForm   data={form} setData={setForm} cfg={cfg} session={session} projectId={selProj?.id} onSubmit={d=>{addConcept(selProj.id,d);closeModal();}} onUploadFile={(file,label,type)=>{uploadConceptFile(selProj.id,file,label,type);closeModal();}} onCancel={closeModal}/>}
         {modal==="save-template" &&<SaveTemplateModal data={form} setData={setForm} onSubmit={d=>{saveTemplate(selProj.id,d.name);closeModal();}} onCancel={closeModal}/>}
         {modal==="manage-templates"&&<ManageTemplatesModal templates={templates} onDelete={deleteTemplate} onApply={tid=>{if(selProj){applyTemplate(selProj.id,tid);}closeModal();}} onCancel={closeModal}/>}
-        {modal==="settings"     &&<SettingsModal tabOrder={tabOrder} userTags={userTags} templates={templates} updateStatus={updateStatus} theme={theme} accentColor={accentColor} customStatuses={customStatuses} onCheckForUpdates={handleCheckForUpdates} onSave={order=>saveTabOrderSync(order)} onSavePreferences={prefs=>{savePreferences(prefs);closeModal();}} onAddTag={addTag} onDeleteTag={deleteTag} onOpenTemplates={()=>openModal("manage-templates",{})} onCancel={closeModal}/>}
+        {modal==="settings"     &&<SettingsModal tabOrder={tabOrder} userTags={userTags} templates={templates} updateStatus={updateStatus} updateError={updateError} theme={theme} accentColor={accentColor} customStatuses={customStatuses} onCheckForUpdates={handleCheckForUpdates} onSave={order=>saveTabOrderSync(order)} onSavePreferences={prefs=>{savePreferences(prefs);closeModal();}} onAddTag={addTag} onDeleteTag={deleteTag} onOpenTemplates={()=>openModal("manage-templates",{})} onCancel={closeModal}/>}
       </ModalWrap>}
     </div>
   );
@@ -1582,7 +1587,7 @@ function NavBtn({active,onClick,icon,label,small,folder,projectColor}){
   return(
     <div className={`q-nav${active?" q-nav-active":""}`} onClick={onClick} style={{fontSize:small?14:13,paddingLeft:small?22:14,display:"flex",alignItems:"center"}}>
       <span style={{fontSize:small?9:13,marginRight:7,display:"flex",alignItems:"center",flexShrink:0}}>{dot}</span>
-      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,color:active?"var(--accent)":small?"var(--txt-sub)":"inherit",fontWeight:small?600:500}}>{label}</span>
+      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,color:active?"var(--accent-text)":small?"var(--txt-sub)":"inherit",fontWeight:small?600:500}}>{label}</span>
       {hasFolder&&<button className="q-folder-btn" onClick={e=>{e.stopPropagation();window.electronAPI.openFolder(folder);}} title={folder}><FolderIcon size={13}/></button>}
     </div>
   );
@@ -1893,7 +1898,7 @@ function OverviewTab({project,latestVer}){
   return(
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={s.statsGrid}>
-        {[{label:"Current Version",value:latestVer,color:"#00D4FF"},{label:"Total Releases",value:project.versions?.length||0,color:"#fff"},{label:"Milestones",value:`${msDone}/${msTotal}`,color:"#fff"},{label:"Progress",value:`${pct}%`,color:"#4ADE80"}].map(st=>(
+        {[{label:"Current Version",value:latestVer,color:"var(--accent-text)"},{label:"Total Releases",value:project.versions?.length||0,color:"var(--txt)"},{label:"Milestones",value:`${msDone}/${msTotal}`,color:"var(--txt)"},{label:"Progress",value:`${pct}%`,color:"#4ADE80"}].map(st=>(
           <div key={st.label} style={s.statCard}><div style={{fontFamily:"'JetBrains Mono'",fontSize:20,fontWeight:700,color:st.color,lineHeight:1}}>{st.value}</div><div style={s.statLbl}>{st.label}</div></div>
         ))}
       </div>
@@ -2764,7 +2769,7 @@ function DraggableList({items,onReorder,children}){
 }
 
 // ── Settings Modal ────────────────────────────────────────────────────────────
-function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,templates,onDeleteTemplate,onOpenTemplates,onCheckForUpdates,updateStatus,theme,accentColor,customStatuses,onSavePreferences}){
+function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,templates,onDeleteTemplate,onOpenTemplates,onCheckForUpdates,updateStatus,updateError,theme,accentColor,customStatuses,onSavePreferences}){
   const [order,setOrder]=useState(tabOrder);const[dragIdx,setDragIdx]=useState(null);
   const [newTagName,setNewTagName]=useState("");const[newTagColor,setNewTagColor]=useState("#00D4FF");
   const [checking,setChecking]=useState(false);
@@ -2896,7 +2901,7 @@ function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,t
               </span>
               <p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:updateStatus==="current"?"#4ADE80":updateStatus==="error"?"#FF6B9D":"var(--txt-faint)",marginTop:3}}>
                 {updateStatus==="current"?"Already on the latest version":
-                 updateStatus==="error"?"Check github.com/JNoles405/qoder/releases":
+                 updateStatus==="error"?(updateError||"Check github.com/JNoles405/qoder/releases"):
                  updateStatus?"":"Up to date"}
               </p>
             </div>
@@ -3394,28 +3399,28 @@ const css=`
 
   .q-nav{display:flex;align-items:center;padding:8px 14px;color:var(--txt-muted);font-family:'Syne',sans-serif;font-weight:500;width:calc(100% - 16px);margin:1px 8px;border-radius:7px;cursor:pointer;transition:all .15s;user-select:none;font-size:14px;}
   .q-nav:hover{background:var(--accent-dim);color:var(--txt);}
-  .q-nav-active{background:var(--accent-dim)!important;color:var(--accent)!important;}
+  .q-nav-active{background:var(--accent-dim)!important;color:var(--accent-text)!important;}
   .q-folder-btn{margin-left:4px;opacity:0;transition:opacity .15s;padding:3px 4px;border-radius:4px;flex-shrink:0;display:flex;align-items:center;background:none;border:none;cursor:pointer;}
   .q-nav:hover .q-folder-btn,.q-nav-active .q-folder-btn{opacity:1;}
 
-  .q-proj-link{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;background:var(--accent-dim);border:1px solid var(--accent-border);border-radius:6px;color:var(--accent);font-size:12px;font-family:'Syne';font-weight:600;transition:all .15s;}
+  .q-proj-link{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;background:var(--accent-dim);border:1px solid var(--accent-border);border-radius:6px;color:var(--accent-text);font-size:12px;font-family:'Syne';font-weight:600;transition:all .15s;}
   .q-proj-link:hover{background:rgba(0,212,255,.12);border-color:rgba(0,212,255,.35);}
 
   .q-btn-primary{padding:9px 18px;background:var(--accent);color:#06090F;border-radius:8px;font-size:14px;font-weight:700;font-family:'Syne',sans-serif;transition:opacity .15s;}.q-btn-primary:hover{opacity:.88;}
   .q-btn-ghost{padding:9px 14px;border:1px solid var(--border-md);border-radius:8px;color:var(--txt-muted);font-size:14px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-ghost:hover{border-color:var(--txt-dim);color:var(--txt);}
   .q-btn-danger{padding:9px 14px;border:1px solid var(--border-md);border-radius:8px;color:var(--txt-muted);font-size:14px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-danger:hover{border-color:#FF4466;color:#FF4466;}
-  .q-btn-new{width:100%;padding:10px;background:var(--accent-dim);border:1px solid var(--accent-border);border-radius:8px;color:var(--accent);font-size:14px;font-weight:600;font-family:'Syne',sans-serif;transition:all .15s;}.q-btn-new:hover{background:rgba(0,212,255,.14);border-color:rgba(0,212,255,.35);}
+  .q-btn-new{width:100%;padding:10px;background:var(--accent-dim);border:1px solid var(--accent-border);border-radius:8px;color:var(--accent-text);font-size:14px;font-weight:600;font-family:'Syne',sans-serif;transition:all .15s;}.q-btn-new:hover{background:rgba(0,212,255,.14);border-color:rgba(0,212,255,.35);}
   .q-sign-out{color:var(--txt-faint);font-size:16px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;transition:all .15s;}.q-sign-out:hover{color:#FF6B9D;border-color:#FF4466;}
   .q-icon-btn{color:var(--txt-sub);font-size:14px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;transition:all .15s;font-family:'Syne';font-weight:600;}.q-icon-btn:hover{color:#E8EAF6;border-color:#2E3560;background:rgba(255,255,255,.03);}
   .q-input{width:100%;background:var(--bg-input);border:1px solid var(--border-md);border-radius:8px;padding:10px 13px;color:var(--txt);font-size:14px;font-family:'Syne',sans-serif;transition:border-color .15s;margin-top:6px;}.q-input:focus{border-color:var(--accent);}
   .q-mono{font-family:'JetBrains Mono',monospace!important;}
-  .q-chip{padding:5px 11px;background:var(--bg-card);border:1px solid var(--border-md);border-radius:20px;color:var(--txt-muted);font-size:12px;font-family:'Syne',sans-serif;transition:all .15s;}.q-chip:hover{border-color:var(--accent-border);color:var(--txt);}.q-chip-on{background:var(--accent-dim)!important;border-color:var(--accent)!important;color:var(--accent)!important;}
+  .q-chip{padding:5px 11px;background:var(--bg-card);border:1px solid var(--border-md);border-radius:20px;color:var(--txt-muted);font-size:12px;font-family:'Syne',sans-serif;transition:all .15s;}.q-chip:hover{border-color:var(--accent-border);color:var(--txt);}.q-chip-on{background:var(--accent-dim)!important;border-color:var(--accent)!important;color:var(--accent-text)!important;}
   .q-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;}.q-card:hover{border-color:var(--accent-border);transform:translateY(-2px);background:var(--bg-card);}
   .q-ver-card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:18px 20px;transition:border-color .2s;}.q-ver-card:hover{border-color:var(--accent-border);}
   .q-ms-row{display:flex;align-items:flex-start;gap:12px;padding:10px 8px;border-radius:8px;transition:background .15s;}.q-ms-row:hover{background:rgba(0,0,0,.04);}
   .q-check{width:22px;height:22px;min-width:22px;border:2px solid #2A3050;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#4ADE80;margin-top:1px;transition:all .15s;flex-shrink:0;}.q-check:hover{border-color:#4ADE80;}.q-check-done{background:rgba(74,222,128,.1);border-color:#4ADE80;}
   .q-del{color:#3A3F58;font-size:13px;padding:3px 5px;transition:color .15s;flex-shrink:0;}.q-del:hover{color:#FF4466;}
-  .q-tab{padding:10px 18px;color:var(--txt-muted);font-size:13px;font-weight:500;font-family:'Syne',sans-serif;border-bottom:2px solid transparent;border-top:none;border-left:none;border-right:none;background:none;margin-bottom:-1px;display:inline-flex;align-items:center;gap:5px;transition:all .15s;white-space:nowrap;}.q-tab:hover{color:var(--txt);}.q-tab-on{color:var(--accent)!important;border-bottom-color:var(--accent)!important;}
+  .q-tab{padding:10px 18px;color:var(--txt-muted);font-size:13px;font-weight:500;font-family:'Syne',sans-serif;border-bottom:2px solid transparent;border-top:none;border-left:none;border-right:none;background:none;margin-bottom:-1px;display:inline-flex;align-items:center;gap:5px;transition:all .15s;white-space:nowrap;}.q-tab:hover{color:var(--txt);}.q-tab-on{color:var(--accent-text)!important;border-bottom-color:var(--accent)!important;}
   .q-modal-submit{}
 `;
 
