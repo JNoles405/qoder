@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.6.4";
+const APP_VER    = "v0.6.5";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -217,6 +217,47 @@ let _confirmResolver = null;
 async function qConfirm(msg) {
   if (!_confirmResolver) return window.confirm(msg);
   return new Promise(resolve => _confirmResolver({ msg, resolve }));
+}
+
+// ── QInput — drop-in for <QInput className="q-input"> that adds Android IME attrs ─
+// Swype, autocorrect, and autocomplete require these HTML attributes in Capacitor WebView
+function QInput({type="text",className="q-input",style,value,onChange,onKeyDown,placeholder,autoFocus,readOnly,...rest}){
+  return(
+    <input
+      type={type}
+      className={className}
+      style={style}
+      value={value}
+      onChange={onChange}
+      onKeyDown={onKeyDown}
+      placeholder={placeholder}
+      autoFocus={autoFocus}
+      readOnly={readOnly}
+      autoCorrect="on"
+      autoComplete="on"
+      autoCapitalize="sentences"
+      spellCheck={true}
+      {...rest}
+    />
+  );
+}
+function QTextarea({className="q-input",style,value,onChange,onKeyDown,placeholder,rows,...rest}){
+  return(
+    <textarea
+      className={className}
+      style={style}
+      value={value}
+      onChange={onChange}
+      onKeyDown={onKeyDown}
+      placeholder={placeholder}
+      rows={rows}
+      autoCorrect="on"
+      autoComplete="on"
+      autoCapitalize="sentences"
+      spellCheck={true}
+      {...rest}
+    />
+  );
 }
 
 function FolderIcon({size=13}){return(<svg width={size} height={size} viewBox="0 0 20 16" fill="none" style={{color:"var(--accent-text)"}}><path d="M1 2.5C1 1.67 1.67 1 2.5 1H7.5L9.5 3.5H17.5C18.33 3.5 19 4.17 19 5V13.5C19 14.33 18.33 15 17.5 15H2.5C1.67 15 1 14.33 1 13.5V2.5Z" fill="currentColor" fillOpacity="0.18" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/></svg>);}
@@ -811,19 +852,19 @@ export default function QoderApp() {
   };
 
   const savePreferences=async(prefs)=>{
-    // prefs: { theme?, accentColor?, customStatuses? }
     if(prefs.theme!==undefined){saveTheme(prefs.theme);}
     if(prefs.accentColor!==undefined){saveAccent(prefs.accentColor);}
     if(prefs.customStatuses!==undefined){setCustomStatuses(prefs.customStatuses);}
     syncTitlebar(prefs.theme??theme, prefs.accentColor??accentColor);
     if(!session||!cfg)return;
+    // Always write all three fields together so nothing gets stale on sync
     try{
       await sb.upsertSettings(cfg.url,cfg.key,session.access_token,session.user.id,{
-        ...(prefs.theme!==undefined?{theme:prefs.theme}:{}),
-        ...(prefs.accentColor!==undefined?{accent_color:prefs.accentColor}:{}),
-        ...(prefs.customStatuses!==undefined?{custom_statuses:prefs.customStatuses}:{}),
+        theme:           prefs.theme          ??theme,
+        accent_color:    prefs.accentColor    ??accentColor,
+        custom_statuses: prefs.customStatuses ??customStatuses,
       });
-    }catch{}
+    }catch(e){showToast("Settings saved locally — sync failed","info");}
   };
 
   // ── Background sync + JWT auto-refresh ──────────────────────────────────────
@@ -933,7 +974,13 @@ export default function QoderApp() {
         setProjects(pjs);
         const tags=await loadUserTags(cfg.url,cfg.key,res.access_token,res.user.id);
         setUserTags(tags);
-        try{const sett=await sb.get(cfg.url,cfg.key,res.access_token,"user_settings",`?user_id=eq.${res.user.id}`);if(sett?.[0]?.tab_order){setTabOrder(mergeTabOrder(sett[0].tab_order));}}catch{}
+        try{
+          const sett=await sb.get(cfg.url,cfg.key,res.access_token,"user_settings",`?user_id=eq.${res.user.id}`);
+          if(sett?.[0]?.tab_order){setTabOrder(mergeTabOrder(sett[0].tab_order));}
+          if(sett?.[0]?.custom_statuses)setCustomStatuses(sett[0].custom_statuses||{});
+          if(sett?.[0]?.theme&&sett[0].theme!=="dark"){saveTheme(sett[0].theme);}
+          if(sett?.[0]?.accent_color&&sett[0].accent_color!=="#00D4FF"){saveAccent(sett[0].accent_color);}
+        }catch{}
         setScreen("app");
       }else if(isSignUp&&res.id){showToast("Check your email to confirm your account.","info");}
       else{showToast(res.error_description||res.msg||res.message||"Authentication failed","err");}
@@ -1562,8 +1609,8 @@ function SetupScreen({onSubmit}){
   const [url,setUrl]=useState("");const[key,setKey]=useState("");
   return(<div style={s.authWrap}><style>{css}</style><div style={s.authBox}>
     <div style={{textAlign:"center",marginBottom:28}}><div style={{fontFamily:"'Syne'",fontSize:48,fontWeight:800,color:"#00D4FF",lineHeight:1,marginBottom:4}}>Q</div><div style={{fontFamily:"'Syne'",fontSize:20,fontWeight:800,color:"var(--txt)"}}>Connect Supabase</div></div>
-    <Field label="Project URL"><input className="q-input" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://xxxx.supabase.co"/></Field>
-    <Field label="Anon / Public Key"><input className="q-input" value={key} onChange={e=>setKey(e.target.value)} placeholder="eyJhbGciOiJ…" style={{fontFamily:"'JetBrains Mono'",fontSize:12}}/></Field>
+    <Field label="Project URL"><QInput className="q-input" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://xxxx.supabase.co"/></Field>
+    <Field label="Anon / Public Key"><QInput className="q-input" value={key} onChange={e=>setKey(e.target.value)} placeholder="eyJhbGciOiJ…" style={{fontFamily:"'JetBrains Mono'",fontSize:12}}/></Field>
     <button className="q-btn-primary" style={{width:"100%",marginTop:8}} onClick={()=>url.trim()&&key.trim()&&onSubmit(url.trim(),key.trim())}>Connect →</button>
   </div></div>);
 }
@@ -1571,8 +1618,8 @@ function AuthScreen({onAuth,busy,onReset}){
   const [isSignUp,setIsSignUp]=useState(false);const[email,setEmail]=useState("");const[pw,setPw]=useState("");const[showPw,setShowPw]=useState(false);
   return(<div style={s.authWrap}><style>{css}</style><div style={s.authBox}>
     <div style={{textAlign:"center",marginBottom:28}}><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:2,marginBottom:6}}><span style={{fontFamily:"'Syne'",fontSize:40,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:30,fontWeight:700,color:"var(--txt)",letterSpacing:"-.5px"}}>oder</span></div><p style={{color:"var(--txt-muted)",fontSize:13}}>{isSignUp?"Create your account":"Sign in to your workspace"}</p></div>
-    <Field label="Email"><input className="q-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" onKeyDown={e=>e.key==="Enter"&&onAuth(email,pw,isSignUp)}/></Field>
-    <Field label="Password"><div style={{position:"relative"}}><input className="q-input" type={showPw?"text":"password"} value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" style={{paddingRight:44}} onKeyDown={e=>e.key==="Enter"&&onAuth(email,pw,isSignUp)}/><button onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"var(--txt-muted)",fontSize:12,background:"none",border:"none",cursor:"pointer"}}>{showPw?"hide":"show"}</button></div></Field>
+    <Field label="Email"><QInput className="q-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" onKeyDown={e=>e.key==="Enter"&&onAuth(email,pw,isSignUp)}/></Field>
+    <Field label="Password"><div style={{position:"relative"}}><QInput className="q-input" type={showPw?"text":"password"} value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" style={{paddingRight:44}} onKeyDown={e=>e.key==="Enter"&&onAuth(email,pw,isSignUp)}/><button onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"var(--txt-muted)",fontSize:12,background:"none",border:"none",cursor:"pointer"}}>{showPw?"hide":"show"}</button></div></Field>
     <button className="q-btn-primary" style={{width:"100%",marginTop:8,opacity:busy?.6:1}} disabled={busy} onClick={()=>onAuth(email,pw,isSignUp)}>{busy?"…":isSignUp?"Create Account":"Sign In →"}</button>
     <div style={{display:"flex",justifyContent:"space-between",marginTop:16,fontSize:13}}><button onClick={()=>setIsSignUp(v=>!v)} style={{color:"#00D4FF",background:"none",border:"none",cursor:"pointer"}}>{isSignUp?"Already have an account?":"Create an account"}</button><button onClick={onReset} style={{color:"var(--txt-faint)",background:"none",border:"none",cursor:"pointer",fontSize:12}}>Change project</button></div>
   </div></div>);
@@ -1632,7 +1679,7 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
 
       {/* Search + status filters */}
       <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:8,marginBottom:10}}>
-        <input className="q-input" style={{maxWidth:isMobile?"100%":320,width:"100%",marginTop:0}} placeholder="Search projects & content…" value={search} onChange={e=>setSearch(e.target.value)}/>
+        <QInput className="q-input" style={{maxWidth:isMobile?"100%":320,width:"100%",marginTop:0}} placeholder="Search projects & content…" value={search} onChange={e=>setSearch(e.target.value)}/>
         <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
           {["all",...Object.keys(STATUS_CONFIG)].map(k=><button key={k} className={`q-chip${filter===k?" q-chip-on":""}`} onClick={()=>setFilter(k)}>{k==="all"?"All":STATUS_CONFIG[k].label}</button>)}
         </div>
@@ -1904,7 +1951,7 @@ function OverviewTab({project,latestVer}){
       </div>
       {msTotal>0&&<div style={s.infoCard}><div style={s.infoLbl}>Milestone Progress</div><div style={{...s.bar,height:8,marginTop:10}}><div style={{...s.barFill,width:`${pct}%`,height:8,transition:"width .6s"}}/></div><div style={{...s.mono10,marginTop:5,color:"var(--txt-muted)"}}>{msDone} of {msTotal} complete</div></div>}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-        <input className="q-input" style={{flex:1,minWidth:140,maxWidth:260,marginTop:0}} placeholder="Search feed…" value={search} onChange={e=>setSearch(e.target.value)}/>
+        <QInput className="q-input" style={{flex:1,minWidth:140,maxWidth:260,marginTop:0}} placeholder="Search feed…" value={search} onChange={e=>setSearch(e.target.value)}/>
         <button className="q-chip" style={{fontFamily:"'JetBrains Mono'",fontSize:11}} onClick={()=>setSortDir(d=>d==="desc"?"asc":"desc")}>{sortDir==="desc"?"↓ Newest":"↑ Oldest"}</button>
         <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{TIME_PERIODS.map(p=><button key={p.key} className={`q-chip${period===p.key?" q-chip-on":""}`} style={{fontSize:11,padding:"3px 9px"}} onClick={()=>setPeriod(p.key)}>{p.label}</button>)}</div>
       </div>
@@ -1996,7 +2043,7 @@ function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSpri
     <div>
       <div style={s.tabBar}><span style={s.mono12}>{done.length}/{todos.length} completed</span></div>
       <div style={{display:"flex",gap:8,marginBottom:6,flexWrap:"wrap"}}>
-        <input className="q-input" style={{flex:1,minWidth:180,marginTop:0}} value={newText} onChange={e=>setNewText(e.target.value)} placeholder="Add a to-do…" onKeyDown={e=>e.key==="Enter"&&handleAdd()}/>
+        <QInput className="q-input" style={{flex:1,minWidth:180,marginTop:0}} value={newText} onChange={e=>setNewText(e.target.value)} placeholder="Add a to-do…" onKeyDown={e=>e.key==="Enter"&&handleAdd()}/>
         <select className="q-input" style={{width:130,marginTop:0}} value={newPriority} onChange={e=>setNewPriority(e.target.value)}>
           {PRIORITY_KEYS.map(k=><option key={k} value={k}>{PRIORITY_CONFIG[k].icon} {PRIORITY_CONFIG[k].label}</option>)}
         </select>
@@ -2060,7 +2107,7 @@ function NotesTab({project,onAdd,onEdit,onDelete,onReorder}){
           <button className="q-btn-primary" onClick={onAdd}>+ Add Note</button>
         </div>
       </div>
-      <input className="q-input" style={{marginBottom:14,marginTop:0}} placeholder="Search notes…" value={search} onChange={e=>setSearch(e.target.value)}/>
+      <QInput className="q-input" style={{marginBottom:14,marginTop:0}} placeholder="Search notes…" value={search} onChange={e=>setSearch(e.target.value)}/>
       {notes.length===0?<div style={s.empty}><p>No notes yet.</p></div>:
         filtered.length===0?<div style={s.empty}><p>No notes match "{search}"</p></div>:(
         <DraggableList items={isSearching?filtered:notes} onReorder={isSearching?()=>{}:onReorder}>{note=>(
@@ -2202,7 +2249,7 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
                       </div>
                     ))}
                     <div style={{display:"flex",gap:8,marginTop:4}}>
-                      <textarea className="q-input" style={{flex:1,marginTop:0,height:60,resize:"vertical",fontSize:13}} value={commentText[iss.id]||""} onChange={e=>setComment(iss.id,e.target.value)} placeholder="Add a comment…" onKeyDown={e=>{if(e.ctrlKey&&e.key==="Enter"){e.preventDefault();submitComment(iss.id);}}}/>
+                      <QTextarea className="q-input" style={{flex:1,marginTop:0,height:60,resize:"vertical",fontSize:13}} value={commentText[iss.id]||""} onChange={e=>setComment(iss.id,e.target.value)} placeholder="Add a comment…" onKeyDown={e=>{if(e.ctrlKey&&e.key==="Enter"){e.preventDefault();submitComment(iss.id);}}}/>
                       <button className="q-btn-primary" style={{alignSelf:"flex-end",padding:"8px 14px",fontSize:12}} onClick={()=>submitComment(iss.id)}>Post</button>
                     </div>
                     <p style={{...s.mono10,color:"var(--txt-faint)",marginTop:4}}>Ctrl+Enter to post</p>
@@ -2447,7 +2494,7 @@ function TimeTab({project,onStart,onStop,onDelete}){
             {!running
               ?<button className="q-btn-primary" style={{padding:"10px 24px",fontSize:14}} onClick={onStart}>Start Timer</button>
               :<div style={{display:"flex",gap:8,flex:1,flexWrap:"wrap"}}>
-                <input className="q-input" style={{flex:1,minWidth:160,marginTop:0,fontSize:13}} value={stopNote} onChange={e=>setStopNote(e.target.value)} placeholder="What did you work on? (optional)"/>
+                <QInput className="q-input" style={{flex:1,minWidth:160,marginTop:0,fontSize:13}} value={stopNote} onChange={e=>setStopNote(e.target.value)} placeholder="What did you work on? (optional)"/>
                 <button className="q-btn-danger" style={{padding:"10px 18px",fontSize:13,borderColor:"#FF4466",color:"#FF7090"}} onClick={handleStop}>Stop</button>
               </div>
             }
@@ -2540,7 +2587,7 @@ function SnippetsTab({project,onAdd,onEdit,onDelete}){
         <button className="q-btn-primary" onClick={onAdd}>+ Add Snippet</button>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-        <input className="q-input" style={{flex:1,minWidth:160,marginTop:0}} placeholder="Search snippets…" value={search} onChange={e=>setSearch(e.target.value)}/>
+        <QInput className="q-input" style={{flex:1,minWidth:160,marginTop:0}} placeholder="Search snippets…" value={search} onChange={e=>setSearch(e.target.value)}/>
         <select className="q-input" style={{width:150,marginTop:0,fontSize:13}} value={langFilter} onChange={e=>setLangFilter(e.target.value)}>
           {langs.map(l=><option key={l} value={l}>{l==="all"?"All Languages":l}</option>)}
         </select>
@@ -2593,7 +2640,7 @@ function SnippetForm({data,setData,isEdit,onSubmit,onCancel}){
   return(
     <div>
       <h2 style={s.modalTitle}>{isEdit?"Edit Snippet":"New Snippet"}</h2>
-      <Field label="Title *"><input className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., Auth middleware" autoFocus/></Field>
+      <Field label="Title *"><QInput className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., Auth middleware" autoFocus/></Field>
       <Field label="Language">
         <select className="q-input" value={data.language||"javascript"} onChange={e=>set("language",e.target.value)}>
           {SNIPPET_LANGUAGES.map(l=><option key={l} value={l}>{l}</option>)}
@@ -2602,7 +2649,7 @@ function SnippetForm({data,setData,isEdit,onSubmit,onCancel}){
       <Field label="Code *"><textarea className="q-input q-mono" style={{height:200,resize:"vertical",fontSize:13}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="// paste your code here…" spellCheck={false}/></Field>
       <Field label="Tags">
         <div style={{display:"flex",gap:8,marginTop:6}}>
-          <input className="q-input" style={{flex:1,marginTop:0}} value={tagInput} onChange={e=>setTagInput(e.target.value)} placeholder="Add tag…" onKeyDown={e=>{if(e.key==="Enter"||e.key===","){e.preventDefault();addTag();}}}/>
+          <QInput className="q-input" style={{flex:1,marginTop:0}} value={tagInput} onChange={e=>setTagInput(e.target.value)} placeholder="Add tag…" onKeyDown={e=>{if(e.key==="Enter"||e.key===","){e.preventDefault();addTag();}}}/>
           <button className="q-btn-ghost" style={{padding:"0 14px"}} onClick={addTag}>Add</button>
         </div>
         {(data.tags||[]).length>0&&(
@@ -2622,8 +2669,8 @@ function SprintForm({data,setData,onSubmit,onCancel}){
   return(
     <div>
       <h2 style={s.modalTitle}>New Sprint</h2>
-      <Field label="Sprint Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., Sprint 1 — Auth & Onboarding" autoFocus/></Field>
-      <Field label="Goal"><textarea className="q-input" style={{height:72,resize:"vertical"}} value={data.goal||""} onChange={e=>set("goal",e.target.value)} placeholder="What does this sprint accomplish?"/></Field>
+      <Field label="Sprint Name *"><QInput className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., Sprint 1 — Auth & Onboarding" autoFocus/></Field>
+      <Field label="Goal"><QTextarea className="q-input" style={{height:72,resize:"vertical"}} value={data.goal||""} onChange={e=>set("goal",e.target.value)} placeholder="What does this sprint accomplish?"/></Field>
       <Field label="Start Date"><input type="date" className="q-input" value={data.startDate||""} onChange={e=>set("startDate",e.target.value)}/></Field>
       <Field label="End Date"><input type="date" className="q-input" value={data.endDate||""} onChange={e=>set("endDate",e.target.value)}/></Field>
       <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&onSubmit(data)} submitLabel="Create Sprint"/>
@@ -2836,7 +2883,7 @@ function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,t
           <div key={key} style={{display:"flex",gap:8,alignItems:"center"}}>
             <span style={{...s.badge,color:val.color,background:val.bg,minWidth:80,textAlign:"center"}}>{val.label}</span>
             <span style={{...s.mono10,color:"var(--txt-faint)",width:14}}>→</span>
-            <input className="q-input" style={{flex:1,marginTop:0,fontSize:13}} value={localStatuses[key]||""} onChange={e=>setLocalStatuses(prev=>({...prev,[key]:e.target.value}))} placeholder={val.label}/>
+            <QInput className="q-input" style={{flex:1,marginTop:0,fontSize:13}} value={localStatuses[key]||""} onChange={e=>setLocalStatuses(prev=>({...prev,[key]:e.target.value}))} placeholder={val.label}/>
             {localStatuses[key]&&<button className="q-del" onClick={()=>setLocalStatuses(prev=>{const n={...prev};delete n[key];return n;})}>✕</button>}
           </div>
         ))}
@@ -2948,15 +2995,15 @@ function ProjectForm({data,setData,title,userTags,templates,onSubmit,onCancel}){
         </div>
       )}
 
-      <Field label="Project Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., CarKeep"/></Field>
-      <Field label="Description"><textarea className="q-input" style={{height:72,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="What does this project do?"/></Field>
+      <Field label="Project Name *"><QInput className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., CarKeep"/></Field>
+      <Field label="Description"><QTextarea className="q-input" style={{height:72,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="What does this project do?"/></Field>
       <Field label="Status"><select className="q-input" value={data.status||"planning"} onChange={e=>set("status",e.target.value)}>{Object.entries(STATUS_CONFIG).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></Field>
       {userTags?.length>0&&<Field label="Tags"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{userTags.map(t=>{const on=(data.tagIds||[]).includes(t.id);return<button key={t.id} onClick={()=>togTag(t.id)} style={{fontSize:12,padding:"4px 11px",borderRadius:12,background:on?`${t.color}20`:"var(--bg-card)",border:`1px solid ${on?t.color:"var(--border-md)"}`,color:on?t.color:"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",fontWeight:600,transition:"all .15s"}}>{t.name}</button>;})} </div></Field>}
-      <Field label="Git Repository URL"><input className="q-input" value={data.gitUrl||""} onChange={e=>set("gitUrl",e.target.value)} placeholder="https://github.com/…"/></Field>
-      <Field label="Supabase Project URL"><input className="q-input" value={data.supabaseUrl||""} onChange={e=>set("supabaseUrl",e.target.value)} placeholder="https://supabase.com/dashboard/project/…"/></Field>
-      <Field label="Vercel Project URL"><input className="q-input" value={data.vercelUrl||""} onChange={e=>set("vercelUrl",e.target.value)} placeholder="https://vercel.com/…"/></Field>
+      <Field label="Git Repository URL"><QInput className="q-input" value={data.gitUrl||""} onChange={e=>set("gitUrl",e.target.value)} placeholder="https://github.com/…"/></Field>
+      <Field label="Supabase Project URL"><QInput className="q-input" value={data.supabaseUrl||""} onChange={e=>set("supabaseUrl",e.target.value)} placeholder="https://supabase.com/dashboard/project/…"/></Field>
+      <Field label="Vercel Project URL"><QInput className="q-input" value={data.vercelUrl||""} onChange={e=>set("vercelUrl",e.target.value)} placeholder="https://vercel.com/…"/></Field>
       <Field label="Local Folder">
-        <div style={{display:"flex",gap:8}}><input className="q-input" style={{flex:1,fontFamily:"'JetBrains Mono'",fontSize:12}} value={data.localFolder||""} onChange={e=>set("localFolder",e.target.value)} placeholder="Folder path…"/>{isElectron&&<button className="q-btn-ghost" style={{flexShrink:0,marginTop:6}} onClick={browseFolder}>Browse</button>}</div>
+        <div style={{display:"flex",gap:8}}><QInput className="q-input" style={{flex:1,fontFamily:"'JetBrains Mono'",fontSize:12}} value={data.localFolder||""} onChange={e=>set("localFolder",e.target.value)} placeholder="Folder path…"/>{isElectron&&<button className="q-btn-ghost" style={{flexShrink:0,marginTop:6}} onClick={browseFolder}>Browse</button>}</div>
       </Field>
       <Field label="Tech Stack"><div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>{TECH_TAGS.map(t=><button key={t} className={`q-chip${(data.techStack||[]).includes(t)?" q-chip-on":""}`} onClick={()=>tog(t)}>{t}</button>)}</div></Field>
       <Field label="Project Color">
@@ -2979,29 +3026,29 @@ function VersionForm({data,setData,onSubmit,onCancel}){
   const addLink=()=>setData(d=>({...d,fileLinks:[...(d.fileLinks||[]),""]  }));
   const rmLink=i=>setData(d=>({...d,fileLinks:d.fileLinks.filter((_,j)=>j!==i)}));
   const today=new Date().toISOString().split("T")[0];
-  return(<div><h2 style={s.modalTitle}>Log New Version</h2><Field label="Version Number *"><input className="q-input q-mono" value={data.version||""} onChange={e=>set("version",e.target.value)} placeholder="e.g., v1.2.0"/></Field><Field label="Release Date"><input type="date" className="q-input" value={data.date?.split("T")[0]||today} onChange={e=>set("date",e.target.value)}/></Field><Field label="Release Notes"><textarea className="q-input" style={{height:90,resize:"vertical"}} value={data.releaseNotes||""} onChange={e=>set("releaseNotes",e.target.value)} placeholder="What changed?"/></Field><Field label="File / Download Links">{(data.fileLinks||[]).map((link,i)=><div key={i} style={{display:"flex",gap:8,marginTop:8}}><input className="q-input" style={{flex:1}} value={link} onChange={e=>updLink(i,e.target.value)} placeholder="https://…"/><button className="q-btn-ghost" style={{padding:"0 12px"}} onClick={()=>rmLink(i)}>✕</button></div>)}<button className="q-btn-ghost" style={{marginTop:8,fontSize:12}} onClick={addLink}>+ Add Link</button></Field><FormActions onCancel={onCancel} onSubmit={()=>data.version?.trim()&&onSubmit(data)} submitLabel="Log Version"/></div>);
+  return(<div><h2 style={s.modalTitle}>Log New Version</h2><Field label="Version Number *"><input className="q-input q-mono" value={data.version||""} onChange={e=>set("version",e.target.value)} placeholder="e.g., v1.2.0"/></Field><Field label="Release Date"><input type="date" className="q-input" value={data.date?.split("T")[0]||today} onChange={e=>set("date",e.target.value)}/></Field><Field label="Release Notes"><QTextarea className="q-input" style={{height:90,resize:"vertical"}} value={data.releaseNotes||""} onChange={e=>set("releaseNotes",e.target.value)} placeholder="What changed?"/></Field><Field label="File / Download Links">{(data.fileLinks||[]).map((link,i)=><div key={i} style={{display:"flex",gap:8,marginTop:8}}><QInput className="q-input" style={{flex:1}} value={link} onChange={e=>updLink(i,e.target.value)} placeholder="https://…"/><button className="q-btn-ghost" style={{padding:"0 12px"}} onClick={()=>rmLink(i)}>✕</button></div>)}<button className="q-btn-ghost" style={{marginTop:8,fontSize:12}} onClick={addLink}>+ Add Link</button></Field><FormActions onCancel={onCancel} onSubmit={()=>data.version?.trim()&&onSubmit(data)} submitLabel="Log Version"/></div>);
 }
-function MilestoneForm({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Add Milestone</h2><Field label="Title *"><input className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., Submit to Play Store"/></Field><Field label="Target Date"><input type="date" className="q-input" value={data.date||""} onChange={e=>set("date",e.target.value)}/></Field><Field label="Description"><textarea className="q-input" style={{height:72,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="Optional…"/></Field><FormActions onCancel={onCancel} onSubmit={()=>data.title?.trim()&&onSubmit(data)} submitLabel="Add Milestone"/></div>);}
-function NoteForm({data,setData,title,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>{title}</h2><Field label="Content *"><textarea className="q-input" style={{height:160,resize:"vertical"}} autoFocus value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Write your note…"/></Field><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Save Note"/></div>);}
-function AssetForm({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Add Asset Link</h2><Field label="Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., Play Store Icon"/></Field><Field label="URL *"><input className="q-input" value={data.url||""} onChange={e=>set("url",e.target.value)} placeholder="https://…"/></Field><Field label="Type"><select className="q-input" value={data.type||"Link"} onChange={e=>set("type",e.target.value)}>{ASSET_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></Field><FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&data.url?.trim()&&onSubmit(data)} submitLabel="Add Asset"/></div>);}
+function MilestoneForm({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Add Milestone</h2><Field label="Title *"><input className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., Submit to Play Store"/></Field><Field label="Target Date"><input type="date" className="q-input" value={data.date||""} onChange={e=>set("date",e.target.value)}/></Field><Field label="Description"><QTextarea className="q-input" style={{height:72,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="Optional…"/></Field><FormActions onCancel={onCancel} onSubmit={()=>data.title?.trim()&&onSubmit(data)} submitLabel="Add Milestone"/></div>);}
+function NoteForm({data,setData,title,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>{title}</h2><Field label="Content *"><QTextarea className="q-input" style={{height:160,resize:"vertical"}} autoFocus value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Write your note…"/></Field><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Save Note"/></div>);}
+function AssetForm({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Add Asset Link</h2><Field label="Name *"><QInput className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., Play Store Icon"/></Field><Field label="URL *"><QInput className="q-input" value={data.url||""} onChange={e=>set("url",e.target.value)} placeholder="https://…"/></Field><Field label="Type"><select className="q-input" value={data.type||"Link"} onChange={e=>set("type",e.target.value)}>{ASSET_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></Field><FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&data.url?.trim()&&onSubmit(data)} submitLabel="Add Asset"/></div>);}
 function IssueForm({data,setData,onSubmit,onCancel}){
   const set=(k,v)=>setData(d=>({...d,[k]:v}));
   return(
     <div>
       <h2 style={s.modalTitle}>Log Issue</h2>
-      <Field label="Title *"><input className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., App crashes on login"/></Field>
+      <Field label="Title *"><QInput className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., App crashes on login"/></Field>
       <Field label="Priority">
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
           {PRIORITY_KEYS.map(k=>{const pc=PRIORITY_CONFIG[k];return<button key={k} className={`q-chip${(data.priority||"medium")===k?" q-chip-on":""}`} onClick={()=>set("priority",k)} style={{borderColor:(data.priority||"medium")===k?pc.color:undefined,color:(data.priority||"medium")===k?pc.color:undefined}}>{pc.icon} {pc.label}</button>;})}
         </div>
       </Field>
-      <Field label="Description"><textarea className="q-input" style={{height:100,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="Steps to reproduce…"/></Field>
+      <Field label="Description"><QTextarea className="q-input" style={{height:100,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="Steps to reproduce…"/></Field>
       <FormActions onCancel={onCancel} onSubmit={()=>data.title?.trim()&&onSubmit(data)} submitLabel="Log Issue"/>
     </div>
   );
 }
-function FixIssueModal({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Mark Issue Fixed</h2><div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.15)",borderRadius:8,padding:"10px 14px",marginBottom:16}}><p style={{color:"#4ADE80",fontSize:13,fontWeight:600}}>{data.title}</p>{data.description&&<p style={{color:"var(--txt-muted)",fontSize:12,marginTop:4}}>{data.description}</p>}</div><Field label="How was it fixed? *"><textarea className="q-input" style={{height:120,resize:"vertical"}} autoFocus value={data.fixDescription||""} onChange={e=>set("fixDescription",e.target.value)} placeholder="Describe the fix…"/></Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:6}}>A note will be automatically created with this fix.</p><FormActions onCancel={onCancel} onSubmit={()=>data.fixDescription?.trim()&&onSubmit(data)} submitLabel="Mark Fixed"/></div>);}
-function IdeaForm({data,setData,title,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>{title}</h2><Field label="Idea *"><textarea className="q-input" style={{height:140,resize:"vertical"}} autoFocus value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Your idea…"/></Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:4}}>Ideas don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Save Idea"/></div>);}
+function FixIssueModal({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Mark Issue Fixed</h2><div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.15)",borderRadius:8,padding:"10px 14px",marginBottom:16}}><p style={{color:"#4ADE80",fontSize:13,fontWeight:600}}>{data.title}</p>{data.description&&<p style={{color:"var(--txt-muted)",fontSize:12,marginTop:4}}>{data.description}</p>}</div><Field label="How was it fixed? *"><QTextarea className="q-input" style={{height:120,resize:"vertical"}} autoFocus value={data.fixDescription||""} onChange={e=>set("fixDescription",e.target.value)} placeholder="Describe the fix…"/></Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:6}}>A note will be automatically created with this fix.</p><FormActions onCancel={onCancel} onSubmit={()=>data.fixDescription?.trim()&&onSubmit(data)} submitLabel="Mark Fixed"/></div>);}
+function IdeaForm({data,setData,title,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>{title}</h2><Field label="Idea *"><QTextarea className="q-input" style={{height:140,resize:"vertical"}} autoFocus value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Your idea…"/></Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:4}}>Ideas don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Save Idea"/></div>);}
 function ConceptForm({data,setData,cfg,session,projectId,onSubmit,onUploadFile,onCancel}){
   const set=(k,v)=>setData(d=>({...d,[k]:v}));
   const fileRef=useRef(null);
@@ -3010,14 +3057,14 @@ function ConceptForm({data,setData,cfg,session,projectId,onSubmit,onUploadFile,o
   const startRec=async()=>{try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});const chunks=[];const mr=new MediaRecorder(stream);mr.ondataavailable=e=>chunks.push(e.data);mr.onstop=()=>{const blob=new Blob(chunks,{type:"audio/webm"});const reader=new FileReader();reader.onload=()=>set("content",reader.result);reader.readAsDataURL(blob);stream.getTracks().forEach(t=>t.stop());};mr.start();mrRef.current=mr;setRecording(true);}catch{alert("Mic access denied");}};
   const stopRec=()=>{mrRef.current?.stop();setRecording(false);};
   const renderInput=()=>{switch(data.type){
-    case "color":return<div style={{display:"flex",gap:10,alignItems:"center",marginTop:8}}><input type="color" value={data.content||"#00D4FF"} onChange={e=>set("content",e.target.value)} style={{width:48,height:40,padding:2,background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:6,cursor:"pointer"}}/><input className="q-input" style={{flex:1,marginTop:0,fontFamily:"'JetBrains Mono'"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="#hex, rgb(), hsl()"/></div>;
+    case "color":return<div style={{display:"flex",gap:10,alignItems:"center",marginTop:8}}><input type="color" value={data.content||"#00D4FF"} onChange={e=>set("content",e.target.value)} style={{width:48,height:40,padding:2,background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:6,cursor:"pointer"}}/><QInput className="q-input" style={{flex:1,marginTop:0,fontFamily:"'JetBrains Mono'"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="#hex, rgb(), hsl()"/></div>;
     case "image":return<div><input className="q-input" value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="https://image-url.com/..."/><button className="q-btn-ghost" style={{marginTop:8,width:"100%"}} onClick={()=>fileRef.current?.click()}>Upload Image</button><input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFileChange}/></div>;
     case "audio":return<div style={{marginTop:8}}>{recording?<button className="q-btn-danger" style={{width:"100%",padding:10}} onClick={stopRec}>Stop Recording</button>:<button className="q-btn-ghost" style={{width:"100%",padding:10}} onClick={startRec}>Start Recording</button>}<button className="q-btn-ghost" style={{marginTop:8,width:"100%"}} onClick={()=>fileRef.current?.click()}>Upload Audio</button><input ref={fileRef} type="file" accept="audio/*" style={{display:"none"}} onChange={handleFileChange}/>{data.content&&<audio src={data.content} controls style={{width:"100%",marginTop:10}}/>}</div>;
     case "code": return<textarea className="q-input q-mono" style={{height:130,resize:"vertical"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="// paste code here"/>;
-    case "link": return<input className="q-input" value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="https://..."/>;
-    default:     return<textarea className="q-input" style={{height:100,resize:"vertical"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Enter text…"/>;
+    case "link": return<QInput className="q-input" value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="https://..."/>;
+    default:     return<QTextarea className="q-input" style={{height:100,resize:"vertical"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Enter text…"/>;
   }};
-  return(<div><h2 style={s.modalTitle}>Add Concept</h2><Field label="Type"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{CONCEPT_TYPES.map(t=><button key={t} className={`q-chip${data.type===t?" q-chip-on":""}`} onClick={()=>set("type",t)}>{CONCEPT_ICONS[t]} {t}</button>)}</div></Field><Field label="Label (optional)"><input className="q-input" value={data.label||""} onChange={e=>set("label",e.target.value)} placeholder="Name this concept…"/></Field><Field label="Content">{renderInput()}</Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:4}}>Concepts don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Add Concept"/></div>);
+  return(<div><h2 style={s.modalTitle}>Add Concept</h2><Field label="Type"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{CONCEPT_TYPES.map(t=><button key={t} className={`q-chip${data.type===t?" q-chip-on":""}`} onClick={()=>set("type",t)}>{CONCEPT_ICONS[t]} {t}</button>)}</div></Field><Field label="Label (optional)"><QInput className="q-input" value={data.label||""} onChange={e=>set("label",e.target.value)} placeholder="Name this concept…"/></Field><Field label="Content">{renderInput()}</Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:4}}>Concepts don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Add Concept"/></div>);
 }
 
 function BuildLogForm({data,setData,versions,onSubmit,onCancel}){
@@ -3038,14 +3085,14 @@ function BuildLogForm({data,setData,versions,onSubmit,onCancel}){
         </select>
       </Field>
       <Field label="Build Number"><input className="q-input q-mono" value={data.buildNumber||""} onChange={e=>set("buildNumber",e.target.value)} placeholder="e.g. 42"/></Field>
-      <Field label="Build Size"><input className="q-input" value={data.buildSize||""} onChange={e=>set("buildSize",e.target.value)} placeholder="e.g. 24.3 MB"/></Field>
+      <Field label="Build Size"><QInput className="q-input" value={data.buildSize||""} onChange={e=>set("buildSize",e.target.value)} placeholder="e.g. 24.3 MB"/></Field>
       <Field label="Status">
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
           {Object.entries(BUILD_STATUSES).map(([k,v])=><button key={k} className={`q-chip${data.status===k?" q-chip-on":""}`} onClick={()=>set("status",k)}>{v.icon} {v.label}</button>)}
         </div>
       </Field>
-      <Field label="Store / Distribution"><input className="q-input" value={data.store||""} onChange={e=>set("store",e.target.value)} placeholder="e.g. Google Play, App Store, Direct"/></Field>
-      <Field label="Notes"><textarea className="q-input" style={{height:72,resize:"vertical"}} value={data.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional…"/></Field>
+      <Field label="Store / Distribution"><QInput className="q-input" value={data.store||""} onChange={e=>set("store",e.target.value)} placeholder="e.g. Google Play, App Store, Direct"/></Field>
+      <Field label="Notes"><QTextarea className="q-input" style={{height:72,resize:"vertical"}} value={data.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional…"/></Field>
       <FormActions onCancel={onCancel} onSubmit={()=>onSubmit({...data,builtAt:today})} submitLabel="Log Build"/>
     </div>
   );
@@ -3059,7 +3106,7 @@ function EnvironmentForm({data,setData,title,onSubmit,onCancel}){
   return(
     <div>
       <h2 style={s.modalTitle}>{title}</h2>
-      <Field label="Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g. Production"/></Field>
+      <Field label="Name *"><QInput className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g. Production"/></Field>
       <Field label="URL"><input className="q-input" value={data.url||""} onChange={e=>set("url",e.target.value)} placeholder="https://…"/></Field>
       <Field label="Color">
         <div style={{display:"flex",gap:8,marginTop:8,alignItems:"center"}}>
@@ -3067,13 +3114,13 @@ function EnvironmentForm({data,setData,title,onSubmit,onCancel}){
           {ENV_PRESET_COLORS.map(c=><button key={c} onClick={()=>set("color",c)} style={{width:22,height:22,borderRadius:"50%",background:c,border:data.color===c?"2px solid #fff":"2px solid transparent",cursor:"pointer"}}/>)}
         </div>
       </Field>
-      <Field label="Notes"><textarea className="q-input" style={{height:60,resize:"vertical"}} value={data.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional…"/></Field>
+      <Field label="Notes"><QTextarea className="q-input" style={{height:60,resize:"vertical"}} value={data.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional…"/></Field>
       <Field label="Environment Variables">
         <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:8}}>
           {(data.variables||[]).map((v,i)=>(
             <div key={i} style={{display:"flex",gap:6,alignItems:"center"}}>
               <input className="q-input q-mono" style={{flex:1,marginTop:0}} value={v.key} onChange={e=>setVar(i,"key",e.target.value)} placeholder="KEY"/>
-              <input className="q-input" style={{flex:2,marginTop:0,fontFamily:v.masked?"monospace":"inherit"}} value={v.value} onChange={e=>setVar(i,"value",e.target.value)} placeholder="value" type={v.masked?"password":"text"}/>
+              <QInput className="q-input" style={{flex:2,marginTop:0,fontFamily:v.masked?"monospace":"inherit"}} value={v.value} onChange={e=>setVar(i,"value",e.target.value)} placeholder="value" type={v.masked?"password":"text"}/>
               <button onClick={()=>setVar(i,"masked",!v.masked)} title="Mask value" style={{padding:"0 8px",color:v.masked?"#00D4FF":"#4B5268",fontFamily:"'JetBrains Mono'",fontSize:12,background:"none",border:"none",cursor:"pointer"}}>🔒</button>
               <button className="q-del" onClick={()=>rmVar(i)}>✕</button>
             </div>
@@ -3104,7 +3151,7 @@ function DependencyForm({data,setData,onSubmit,onCancel}){
           {Object.entries(DEP_STATUSES).map(([k,v])=><button key={k} className={`q-chip${data.status===k?" q-chip-on":""}`} onClick={()=>set("status",k)}>{v.icon} {v.label}</button>)}
         </div>
       </Field>
-      <Field label="Notes"><textarea className="q-input" style={{height:60,resize:"vertical"}} value={data.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional notes…"/></Field>
+      <Field label="Notes"><QTextarea className="q-input" style={{height:60,resize:"vertical"}} value={data.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional notes…"/></Field>
       <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&onSubmit(data)} submitLabel="Add Dependency"/>
     </div>
   );
@@ -3206,7 +3253,7 @@ function SaveTemplateModal({data,setData,onSubmit,onCancel}){
     <div>
       <h2 style={s.modalTitle}>Save as Template</h2>
       <p style={{color:"var(--txt-muted)",fontSize:13,marginBottom:16,lineHeight:1.6}}>Saves this project's status, tech stack, links, milestones, open todos, and environments as a reusable template. Masked environment variables are excluded.</p>
-      <Field label="Template Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., React Native App Starter" autoFocus/></Field>
+      <Field label="Template Name *"><QInput className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., React Native App Starter" autoFocus/></Field>
       <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&onSubmit(data)} submitLabel="Save Template"/>
     </div>
   );
@@ -3300,7 +3347,7 @@ function ChangelogModal({project,onClose,onPublishRelease}){
               <div style={{marginBottom:10}}>
                 <label style={{display:"block",fontSize:11,color:"var(--txt-muted)",fontWeight:700,letterSpacing:".5px",textTransform:"uppercase",marginBottom:6}}>GitHub Token (with Contents: Write)</label>
                 <div style={{display:"flex",gap:8}}>
-                  <input className="q-input" type={showToken?"text":"password"} style={{flex:1,marginTop:0,fontFamily:"'JetBrains Mono'",fontSize:12}} value={ghToken} onChange={e=>saveToken(e.target.value)} placeholder="ghp_xxxxxxxxxxxx"/>
+                  <QInput className="q-input" type={showToken?"text":"password"} style={{flex:1,marginTop:0,fontFamily:"'JetBrains Mono'",fontSize:12}} value={ghToken} onChange={e=>saveToken(e.target.value)} placeholder="ghp_xxxxxxxxxxxx"/>
                   <button className="q-btn-ghost" style={{padding:"0 12px",fontSize:12}} onClick={()=>setShowToken(v=>!v)}>{showToken?"Hide":"Show"}</button>
                 </div>
                 <p style={{...s.mono10,marginTop:5,color:"var(--txt-faint)"}}>Saved locally on this device. Tag: {latestVer?`v${latestVer.version}`:"no versions yet"} · Repo: {repo.owner}/{repo.repo}</p>
@@ -3381,10 +3428,23 @@ function Splash({msg}){return<div style={{display:"flex",alignItems:"center",jus
 const css=`
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500;700&display=swap');
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-  /* Force text selection on entire doc for Android IME, then restrict non-inputs */
+  /* Android IME / Swype / Autocorrect fix for Capacitor WebView */
   html,body,#root{-webkit-user-select:none;user-select:none;}
+  input,textarea{
+    outline:none;
+    -webkit-user-select:text!important;
+    user-select:text!important;
+    -webkit-touch-callout:default!important;
+    touch-action:manipulation;
+    /* These unlock the Android IME keyboard features */
+    -webkit-tap-highlight-color:transparent;
+  }
+  select{outline:none;-webkit-user-select:text!important;user-select:text!important;}
+  /* Prevent WebView from eating key events that IME needs */
+  input[type="text"],input[type="email"],input[type="password"],input[type="search"],input[type="url"],textarea{
+    -webkit-user-modify:read-write-plaintext-only;
+  }
   ::-webkit-scrollbar{width:4px;height:4px;}::-webkit-scrollbar-track{background:var(--bg,#0A0E1A);}::-webkit-scrollbar-thumb{background:var(--scrollbar,#1E2540);border-radius:2px;}
-  input,textarea,select{outline:none;-webkit-user-select:text!important;user-select:text!important;-webkit-touch-callout:default!important;touch-action:manipulation;}
   button{cursor:pointer;border:none;background:none;font-family:'Syne',sans-serif;}a{text-decoration:none;}
   audio{accent-color:#00D4FF;}
 
