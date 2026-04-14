@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.6.3";
+const APP_VER    = "v0.6.4";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -138,7 +138,7 @@ function buildThemeCSS(themeName, accent="#00D4FF"){
   --accent-text:${accentText};
   --scrollbar:${isLight?"#A8B4CC":"#1E2540"};
   --shadow:${isLight?"0 1px 4px rgba(0,0,0,.10)":"none"};
-  --overlay:${isLight?"rgba(60,70,100,.55)":"rgba(4,6,14,.88)"};
+  --overlay:${isLight?"rgba(30,40,70,.65)":"rgba(4,6,14,.88)"};
   --toast-ok-bg:${isLight?"#E8FAF0":"#0F2A1A"};
   --toast-err-bg:${isLight?"#FEE8EE":"#2A0F18"};
   --toast-info-bg:${isLight?"#E8F4FF":"#0F1A2A"};
@@ -219,7 +219,7 @@ async function qConfirm(msg) {
   return new Promise(resolve => _confirmResolver({ msg, resolve }));
 }
 
-function FolderIcon({size=13}){return(<svg width={size} height={size} viewBox="0 0 20 16" fill="none"><path d="M1 2.5C1 1.67 1.67 1 2.5 1H7.5L9.5 3.5H17.5C18.33 3.5 19 4.17 19 5V13.5C19 14.33 18.33 15 17.5 15H2.5C1.67 15 1 14.33 1 13.5V2.5Z" fill="#00d3fe" fillOpacity="0.18" stroke="#00d3fe" strokeWidth="1.4" strokeLinejoin="round"/></svg>);}
+function FolderIcon({size=13}){return(<svg width={size} height={size} viewBox="0 0 20 16" fill="none" style={{color:"var(--accent-text)"}}><path d="M1 2.5C1 1.67 1.67 1 2.5 1H7.5L9.5 3.5H17.5C18.33 3.5 19 4.17 19 5V13.5C19 14.33 18.33 15 17.5 15H2.5C1.67 15 1 14.33 1 13.5V2.5Z" fill="currentColor" fillOpacity="0.18" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/></svg>);}
 
 // ── Supabase client ───────────────────────────────────────────────────────────
 const sb = {
@@ -2182,7 +2182,7 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
                   <div style={{...s.mono10,color:"var(--txt-dim)"}}>Logged {new Date(iss.createdAt).toLocaleDateString()}</div>
                   <button onClick={()=>fileRefs.current[iss.id]?.click()} className="q-btn-ghost" style={{fontSize:11,padding:"2px 10px"}}>Add Screenshot</button>
                   <input ref={el=>fileRefs.current[iss.id]=el} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)onUploadScreenshot(iss.id,f);e.target.value="";}}/>
-                  <button onClick={()=>toggleComments(iss.id)} style={{fontSize:11,padding:"2px 10px",background:"transparent",border:"1px solid var(--border-md)",borderRadius:6,color:commentCount>0?"var(--accent)":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>
+                  <button onClick={()=>toggleComments(iss.id)} style={{fontSize:11,padding:"2px 10px",background:"transparent",border:"1px solid var(--border-md)",borderRadius:6,color:commentCount>0?"var(--accent-text)":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>
                     {commentCount>0?`${commentCount} comment${commentCount!==1?"s":""}   ${isExpanded?"▲":"▼"}`:"Add Comment"}
                   </button>
                 </div>
@@ -2332,7 +2332,7 @@ function SprintsTab({project,onAdd,onUpdateStatus,onDelete,onAssignTodo}){
                   {spTodos.slice(0,6).map(t=>(
                     <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0"}}>
                       <span style={{width:14,height:14,borderRadius:3,border:`1.5px solid ${t.completed?"#4ADE80":"#2A3050"}`,background:t.completed?"rgba(74,222,128,.1)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"#4ADE80",flexShrink:0}}>{t.completed&&"✓"}</span>
-                      <span style={{fontSize:13,color:t.completed?"#6B7290":"#C0C6E0",textDecoration:t.completed?"line-through":"none",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.text}</span>
+                      <span style={{fontSize:13,color:t.completed?"var(--txt-faint)":"var(--txt-sub)",textDecoration:t.completed?"line-through":"none",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.text}</span>
                       <span style={{fontSize:10,color:PRIORITY_CONFIG[t.priority||"medium"].color}}>{PRIORITY_CONFIG[t.priority||"medium"].icon}</span>
                     </div>
                   ))}
@@ -2569,7 +2569,7 @@ function SnippetCard({snippet,onEdit,onDelete}){
           </div>
           {(snippet.tags||[]).length>0&&(
             <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-              {snippet.tags.map((t,i)=><span key={i} style={{fontSize:10,padding:"1px 7px",borderRadius:10,background:"var(--accent-dim)",border:"1px solid var(--accent-border)",color:"var(--accent)",fontFamily:"'JetBrains Mono'"}}>{t}</span>)}
+              {snippet.tags.map((t,i)=><span key={i} style={{fontSize:10,padding:"1px 7px",borderRadius:10,background:"var(--accent-dim)",border:"1px solid var(--accent-border)",color:"var(--accent-text)",fontFamily:"'JetBrains Mono'"}}>{t}</span>)}
             </div>
           )}
         </div>
@@ -2607,7 +2607,7 @@ function SnippetForm({data,setData,isEdit,onSubmit,onCancel}){
         </div>
         {(data.tags||[]).length>0&&(
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
-            {(data.tags||[]).map((t,i)=><span key={i} style={{display:"flex",alignItems:"center",gap:5,padding:"2px 8px",borderRadius:10,background:"var(--accent-dim)",border:"1px solid var(--accent-border)",color:"var(--accent)",fontSize:11,fontFamily:"'JetBrains Mono'"}}>{t}<button onClick={()=>removeTag(t)} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:12,lineHeight:1,padding:0}}>✕</button></span>)}
+            {(data.tags||[]).map((t,i)=><span key={i} style={{display:"flex",alignItems:"center",gap:5,padding:"2px 8px",borderRadius:10,background:"var(--accent-dim)",border:"1px solid var(--accent-border)",color:"var(--accent-text)",fontSize:11,fontFamily:"'JetBrains Mono'"}}>{t}<button onClick={()=>removeTag(t)} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:12,lineHeight:1,padding:0}}>✕</button></span>)}
           </div>
         )}
       </Field>
@@ -3280,7 +3280,7 @@ function ChangelogModal({project,onClose,onPublishRelease}){
       </div>
 
       {/* Generated changelog */}
-      <div style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:18,maxHeight:"40vh",overflowY:"auto",marginBottom:16}}>
+      <div style={{background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:10,padding:18,maxHeight:"40vh",overflowY:"auto",marginBottom:16}}>
         <pre style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--txt-sub)",whiteSpace:"pre-wrap",lineHeight:1.7,margin:0}}>{md}</pre>
       </div>
 
@@ -3364,7 +3364,7 @@ function ConfirmDialog({msg,onYes,onNo}){
   return(
     <>
       <div style={{position:"fixed",inset:0,background:"var(--overlay)",zIndex:1100}}/>
-      <div style={{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1101,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:14,padding:"28px 32px",maxWidth:380,width:"90%",boxShadow:"0 16px 48px rgba(0,0,0,.6)"}}>
+      <div style={{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1101,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:14,padding:"28px 32px",maxWidth:380,width:"90%",boxShadow:"0 8px 40px rgba(0,0,0,.3)"}}>
         <p style={{fontFamily:"'Syne'",fontSize:15,fontWeight:600,color:"var(--txt)",lineHeight:1.5,marginBottom:24}}>{msg}</p>
         <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
           <button className="q-btn-ghost" onClick={onNo} autoFocus>Cancel</button>
@@ -3393,7 +3393,7 @@ const css=`
   .q-tab-bar{display:flex;border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
   .q-tab-bar::-webkit-scrollbar{display:none;}
   .q-tab-arrow{position:absolute;top:0;bottom:1px;width:30px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;font-size:14px;z-index:2;transition:all .15s;}
-  .q-tab-arrow:hover{color:#00D4FF;}
+  .q-tab-arrow:hover{color:var(--accent-text);}
   .q-tab-arrow-left{left:0;color:var(--txt-muted);background:linear-gradient(to right,var(--bg) 55%,transparent);}
   .q-tab-arrow-right{right:0;color:var(--txt-muted);background:linear-gradient(to left,var(--bg) 55%,transparent);}
 
@@ -3407,7 +3407,7 @@ const css=`
   .q-proj-link:hover{background:rgba(0,212,255,.12);border-color:rgba(0,212,255,.35);}
 
   .q-btn-primary{padding:9px 18px;background:var(--accent);color:#06090F;border-radius:8px;font-size:14px;font-weight:700;font-family:'Syne',sans-serif;transition:opacity .15s;}.q-btn-primary:hover{opacity:.88;}
-  .q-btn-ghost{padding:9px 14px;border:1px solid var(--border-md);border-radius:8px;color:var(--txt-muted);font-size:14px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-ghost:hover{border-color:var(--txt-dim);color:var(--txt);}
+  .q-btn-ghost{padding:9px 14px;border:1px solid var(--border-md);box-shadow:var(--shadow);border-radius:8px;color:var(--txt-muted);font-size:14px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-ghost:hover{border-color:var(--txt-dim);color:var(--txt);}
   .q-btn-danger{padding:9px 14px;border:1px solid var(--border-md);border-radius:8px;color:var(--txt-muted);font-size:14px;font-family:'Syne',sans-serif;background:transparent;transition:all .15s;}.q-btn-danger:hover{border-color:#FF4466;color:#FF4466;}
   .q-btn-new{width:100%;padding:10px;background:var(--accent-dim);border:1px solid var(--accent-border);border-radius:8px;color:var(--accent-text);font-size:14px;font-weight:600;font-family:'Syne',sans-serif;transition:all .15s;}.q-btn-new:hover{background:rgba(0,212,255,.14);border-color:rgba(0,212,255,.35);}
   .q-sign-out{color:var(--txt-faint);font-size:16px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;transition:all .15s;}.q-sign-out:hover{color:#FF6B9D;border-color:#FF4466;}
@@ -3456,18 +3456,18 @@ const s={
   badge:{fontSize:11,fontWeight:600,padding:"3px 8px",borderRadius:4,fontFamily:"'JetBrains Mono'",letterSpacing:".3px"},
   mono12:{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--txt-muted)"},
   mono10:{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-muted)"},
-  techChip:{fontSize:11,padding:"3px 7px",background:"var(--accent-dim)",border:"1px solid var(--accent-border)",borderRadius:4,color:"var(--accent)",fontFamily:"'JetBrains Mono'"},
+  techChip:{fontSize:11,padding:"3px 7px",background:"var(--accent-dim)",border:"1px solid var(--accent-border)",borderRadius:4,color:"var(--accent-text)",fontFamily:"'JetBrains Mono'"},
   bar:{flex:1,height:4,background:"var(--border)",borderRadius:2,overflow:"hidden"},
   barFill:{height:4,background:"linear-gradient(90deg,var(--accent),#4ADE80)",borderRadius:2},
   cardTitle:{fontFamily:"'Syne'",fontSize:16,fontWeight:700,marginBottom:6,color:"var(--txt)"},
   cardDesc:{fontSize:14,color:"var(--txt-sub)",lineHeight:1.5,marginBottom:12,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"},
-  tabPill:{fontSize:10,background:"var(--accent-dim)",color:"var(--accent)",padding:"1px 6px",borderRadius:10,fontFamily:"'JetBrains Mono'"},
+  tabPill:{fontSize:10,background:"var(--accent-dim)",color:"var(--accent-text)",padding:"1px 6px",borderRadius:10,fontFamily:"'JetBrains Mono'"},
   tabBar:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16},
   infoCard:{background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,padding:"15px 17px"},
   infoLbl:{fontSize:11,color:"var(--txt-muted)",fontWeight:700,letterSpacing:".8px",textTransform:"uppercase"},
-  fileLink:{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--accent)",background:"var(--accent-dim)",border:"1px solid var(--accent-border)",borderRadius:4,padding:"4px 8px",display:"inline-block"},
+  fileLink:{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--accent-text)",background:"var(--accent-dim)",border:"1px solid var(--accent-border)",borderRadius:4,padding:"4px 8px",display:"inline-block"},
   overlayBackdrop:{position:"fixed",inset:0,background:"var(--overlay)",zIndex:1000},
-  modalCentered:{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1001,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:14,padding:26,width:"90%",maxWidth:560,maxHeight:"90vh",overflowY:"auto"},
+  modalCentered:{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1001,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:14,padding:26,width:"90%",maxWidth:560,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 8px 48px rgba(0,0,0,.25)"},
   modalTitle:{fontFamily:"'Syne'",fontSize:20,fontWeight:700,marginBottom:18,color:"var(--txt)"},
   fieldLbl:{display:"block",fontSize:11,fontWeight:700,color:"var(--txt-muted)",letterSpacing:".7px",textTransform:"uppercase",marginBottom:0},
   authWrap:{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"var(--bg)",padding:20},
