@@ -9,16 +9,18 @@ const isDev  = !app.isPackaged;
 let autoUpdater;
 try {
   ({ autoUpdater } = require('electron-updater'));
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload    = true;
   autoUpdater.autoInstallOnAppQuit = true;
-} catch { /* electron-updater not installed yet — safe to ignore in dev */ }
+  autoUpdater.logger          = require('electron-log');
+  autoUpdater.logger.transports.file.level = 'info';
+} catch { /* electron-updater not installed — safe in dev */ }
 
-app.on('remote-require', (event) => event.preventDefault());
-app.on('remote-get-global', (event) => event.preventDefault());
+app.on('remote-require',    (e) => e.preventDefault());
+app.on('remote-get-global', (e) => e.preventDefault());
 
 // ── IPC Handlers ──────────────────────────────────────────────────────────────
 
-ipcMain.handle('open-folder', async (event, folderPath) => {
+ipcMain.handle('open-folder', async (_, folderPath) => {
   if (!folderPath) return;
   const err = await shell.openPath(folderPath);
   if (err) dialog.showErrorBox('Could not open folder', err);
@@ -32,7 +34,7 @@ ipcMain.handle('select-folder', async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
-ipcMain.handle('open-html-in-browser', async (event, html) => {
+ipcMain.handle('open-html-in-browser', async (_, html) => {
   try {
     const tmpPath = path.join(os.tmpdir(), `qoder-report-${Date.now()}.html`);
     fs.writeFileSync(tmpPath, html, 'utf8');
@@ -43,15 +45,29 @@ ipcMain.handle('open-html-in-browser', async (event, html) => {
   }
 });
 
-ipcMain.handle('check-for-updates', () => {
-  if (autoUpdater && !isDev) autoUpdater.checkForUpdates();
+// Returns: { status: 'available'|'not-available'|'error', message? }
+ipcMain.handle('check-for-updates', async () => {
+  if (!autoUpdater) return { status: 'error', message: 'Updater not available (dev build)' };
+  if (isDev)        return { status: 'error', message: 'Updates disabled in development mode' };
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    // result.updateInfo.version is the latest version on GitHub
+    const latest  = result?.updateInfo?.version;
+    const current = app.getVersion();
+    if (latest && latest !== current) {
+      return { status: 'available', version: latest };
+    }
+    return { status: 'not-available', version: current };
+  } catch (err) {
+    return { status: 'error', message: err.message };
+  }
 });
 
 ipcMain.handle('install-update', () => {
   if (autoUpdater) autoUpdater.quitAndInstall();
 });
 
-ipcMain.handle('set-titlebar-overlay', (event, opts) => {
+ipcMain.handle('set-titlebar-overlay', (_, opts) => {
   if (mainWindow && process.platform === 'win32') {
     try { mainWindow.setTitleBarOverlay(opts); } catch {}
   }
@@ -66,11 +82,11 @@ function createWindow() {
     height: 860,
     minWidth: 900,
     minHeight: 600,
-    show: false, // show after ready-to-show to avoid white flash
+    show: false,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     ...(process.platform === 'win32' ? {
       titleBarOverlay: {
-        color: '#0c1020',
+        color:       '#0c1020',
         symbolColor: '#8B8FA8',
         height: 32,
       }
@@ -78,14 +94,13 @@ function createWindow() {
     backgroundColor: '#0A0E1A',
     icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
-      nodeIntegration: false,
+      nodeIntegration:  false,
       contextIsolation: true,
-      sandbox: false,
+      sandbox:          false,
       preload: path.join(__dirname, 'preload.js'),
     },
   });
 
-  // Open maximized so the full screen is used from the start
   mainWindow.maximize();
   mainWindow.show();
 
@@ -101,14 +116,18 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  // Wire up auto-updater events → renderer
+  // Auto-updater events → renderer
   if (autoUpdater && !isDev) {
-    autoUpdater.on('update-available',    () => mainWindow?.webContents.send('update-available'));
-    autoUpdater.on('download-progress',   () => mainWindow?.webContents.send('update-progress'));
-    autoUpdater.on('update-downloaded',   () => mainWindow?.webContents.send('update-ready'));
-    autoUpdater.on('error', (err)         => console.error('Updater error:', err));
-    // Check on startup after a short delay
-    setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch {} }, 8000);
+    autoUpdater.on('update-available',  (info) => mainWindow?.webContents.send('update-available',  info.version));
+    autoUpdater.on('download-progress', ()     => mainWindow?.webContents.send('update-progress'));
+    autoUpdater.on('update-downloaded', (info) => mainWindow?.webContents.send('update-ready',      info.version));
+    autoUpdater.on('update-not-available', ()  => mainWindow?.webContents.send('update-not-available'));
+    autoUpdater.on('error', (err) => {
+      console.error('Updater error:', err.message);
+      mainWindow?.webContents.send('update-error', err.message);
+    });
+    // Check 10 seconds after launch
+    setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch {} }, 10000);
   }
 
   return mainWindow;
@@ -144,8 +163,9 @@ function buildMenu() {
       ...(isMac ? [{ type: 'separator' }, { role: 'front' }] : [{ role: 'close' }])
     ]},
     { label: 'Help', submenu: [
-      { label: 'About Qoder', click: () => dialog.showMessageBox({ message: 'Qoder v1.0.0', detail: 'Track every build.', buttons: ['OK'] }) },
+      { label: 'About Qoder', click: () => dialog.showMessageBox({ message: `Qoder v${app.getVersion()}`, detail: 'Track every build.', buttons: ['OK'] }) },
       { type: 'separator' },
+      { label: 'Check for Updates', click: () => mainWindow?.webContents.send('menu-check-updates') },
       { label: 'Supabase Dashboard', click: () => shell.openExternal('https://supabase.com/dashboard') },
     ]},
   ];

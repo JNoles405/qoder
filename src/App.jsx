@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.6.1";
+const APP_VER    = "v0.6.2";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -697,6 +697,21 @@ export default function QoderApp() {
 
   const showToast = (msg,type="ok") => { setToast({msg,type}); setTimeout(()=>setToast(null),3500); };
 
+  const handleCheckForUpdates = async () => {
+    setUpdateStatus("checking");
+    try {
+      const result = await window.electronAPI?.checkForUpdates?.();
+      if (!result) { setUpdateStatus(null); return; }
+      if (result.status === "available")     { setUpdateStatus("available");  showToast(`Update v${result.version} downloading…`, "info"); }
+      else if (result.status === "not-available") { setUpdateStatus("current"); setTimeout(()=>setUpdateStatus(s=>s==="current"?null:s), 4000); }
+      else if (result.status === "error")    { setUpdateStatus("error");     showToast(result.message||"Update check failed", "err"); setTimeout(()=>setUpdateStatus(null),5000); }
+    } catch(e) {
+      setUpdateStatus("error");
+      showToast(e.message||"Update check failed", "err");
+      setTimeout(()=>setUpdateStatus(null), 5000);
+    }
+  };
+
   // Sidebar resize drag
   const startSidebarDrag = (e) => {
     e.preventDefault();
@@ -730,10 +745,13 @@ export default function QoderApp() {
   // Auto-update listeners (Electron only)
   useEffect(() => {
     if (!window.electronAPI?.onUpdateAvailable) return;
-    const cleanA = window.electronAPI.onUpdateAvailable(()=>setUpdateStatus("available"));
-    const cleanP = window.electronAPI.onUpdateProgress?.(()=>setUpdateStatus("downloading"));
-    const cleanR = window.electronAPI.onUpdateReady(()=>setUpdateStatus("ready"));
-    return () => { cleanA?.(); cleanP?.(); cleanR?.(); };
+    const cleanA  = window.electronAPI.onUpdateAvailable((_,v)=>setUpdateStatus("available"));
+    const cleanP  = window.electronAPI.onUpdateProgress?.(()=>setUpdateStatus("downloading"));
+    const cleanR  = window.electronAPI.onUpdateReady((_,v)=>setUpdateStatus("ready"));
+    const cleanN  = window.electronAPI.onUpdateNotAvailable?.(()=>setUpdateStatus("current"));
+    const cleanE  = window.electronAPI.onUpdateError?.((_,msg)=>setUpdateStatus("error"));
+    const cleanM  = window.electronAPI.onMenuCheckUpdates?.(()=>handleCheckForUpdates());
+    return () => { cleanA?.(); cleanP?.(); cleanR?.(); cleanN?.(); cleanE?.(); cleanM?.(); };
   }, []);
 
   // ── Boot ────────────────────────────────────────────────────────────────────
@@ -1512,7 +1530,7 @@ export default function QoderApp() {
         {modal==="add-concept"  &&<ConceptForm   data={form} setData={setForm} cfg={cfg} session={session} projectId={selProj?.id} onSubmit={d=>{addConcept(selProj.id,d);closeModal();}} onUploadFile={(file,label,type)=>{uploadConceptFile(selProj.id,file,label,type);closeModal();}} onCancel={closeModal}/>}
         {modal==="save-template" &&<SaveTemplateModal data={form} setData={setForm} onSubmit={d=>{saveTemplate(selProj.id,d.name);closeModal();}} onCancel={closeModal}/>}
         {modal==="manage-templates"&&<ManageTemplatesModal templates={templates} onDelete={deleteTemplate} onApply={tid=>{if(selProj){applyTemplate(selProj.id,tid);}closeModal();}} onCancel={closeModal}/>}
-        {modal==="settings"     &&<SettingsModal tabOrder={tabOrder} userTags={userTags} templates={templates} updateStatus={updateStatus} theme={theme} accentColor={accentColor} customStatuses={customStatuses} onCheckForUpdates={()=>{window.electronAPI?.checkForUpdates?.();setUpdateStatus("checking");setTimeout(()=>setUpdateStatus(s=>s==="checking"?null:s),8000);}} onSave={order=>saveTabOrderSync(order)} onSavePreferences={prefs=>{savePreferences(prefs);closeModal();}} onAddTag={addTag} onDeleteTag={deleteTag} onOpenTemplates={()=>openModal("manage-templates",{})} onCancel={closeModal}/>}
+        {modal==="settings"     &&<SettingsModal tabOrder={tabOrder} userTags={userTags} templates={templates} updateStatus={updateStatus} theme={theme} accentColor={accentColor} customStatuses={customStatuses} onCheckForUpdates={handleCheckForUpdates} onSave={order=>saveTabOrderSync(order)} onSavePreferences={prefs=>{savePreferences(prefs);closeModal();}} onAddTag={addTag} onDeleteTag={deleteTag} onOpenTemplates={()=>openModal("manage-templates",{})} onCancel={closeModal}/>}
       </ModalWrap>}
     </div>
   );
@@ -2870,15 +2888,21 @@ function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,t
             <div>
               <span style={{color:"var(--txt)",fontSize:13,fontFamily:"'Syne'",fontWeight:600}}>
                 {updateStatus==="ready"?"Update ready to install"
-                :updateStatus==="available"?"Downloading update…"
+                :updateStatus==="available"||updateStatus==="downloading"?"Downloading update…"
                 :updateStatus==="checking"?"Checking for updates…"
+                :updateStatus==="current"?"✓ You're up to date"
+                :updateStatus==="error"?"Update check failed — see GitHub for latest"
                 :"Qoder "+APP_VER}
               </span>
-              {!updateStatus&&<p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",marginTop:3}}>Up to date</p>}
+              <p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:updateStatus==="current"?"#4ADE80":updateStatus==="error"?"#FF6B9D":"var(--txt-faint)",marginTop:3}}>
+                {updateStatus==="current"?"Already on the latest version":
+                 updateStatus==="error"?"Check github.com/JNoles405/qoder/releases":
+                 updateStatus?"":"Up to date"}
+              </p>
             </div>
             {updateStatus==="ready"
               ?<button className="q-btn-primary" style={{padding:"7px 14px",fontSize:12}} onClick={()=>window.electronAPI.installUpdate()}>Restart & Install</button>
-              :<button className="q-btn-ghost" style={{padding:"7px 14px",fontSize:12,opacity:checking||updateStatus==="available"?.5:1}} disabled={checking||updateStatus==="available"} onClick={handleCheckUpdates}>{checking?"Checking…":"Check for Updates"}</button>
+              :<button className="q-btn-ghost" style={{padding:"7px 14px",fontSize:12,opacity:checking||updateStatus==="available"||updateStatus==="downloading"?.5:1}} disabled={checking||updateStatus==="available"||updateStatus==="downloading"} onClick={handleCheckUpdates}>{checking?"Checking…":"Check for Updates"}</button>
             }
           </div>
         </div>
