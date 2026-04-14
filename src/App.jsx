@@ -200,6 +200,7 @@ const DEFAULT_TABS=[
   {key:"build-log",    label:"Build Log"    },
   {key:"environments", label:"Environments" },
   {key:"dependencies", label:"Dependencies" },
+  {key:"snippets",     label:"Snippets"     },
   {key:"time",         label:"Time"         },
   {key:"ideas",        label:"Ideas"        },
   {key:"concepts",     label:"Concepts"     },
@@ -245,7 +246,7 @@ async function loadProjects(url,key,token,userId){
   const rows=await sb.get(url,key,token,"projects",`?user_id=eq.${userId}&order=position.asc`);
   if(!rows.length)return[];
   const ids=rows.map(p=>p.id).join(",");
-  const [vers,miles,notes,todos,assets,issues,ideas,concepts,builds,envs,deps,ptRows,sprints,timeSess,iComments]=await Promise.all([
+  const [vers,miles,notes,todos,assets,issues,ideas,concepts,builds,envs,deps,ptRows,sprints,timeSess,iComments,snippets]=await Promise.all([
     sb.get(url,key,token,"versions",       `?project_id=in.(${ids})&order=date.desc`),
     sb.get(url,key,token,"milestones",     `?project_id=in.(${ids})&order=created_at.asc`),
     sb.get(url,key,token,"notes",          `?project_id=in.(${ids})&order=position.asc`),
@@ -261,6 +262,7 @@ async function loadProjects(url,key,token,userId){
     sb.get(url,key,token,"sprints",        `?project_id=in.(${ids})&order=position.asc`),
     sb.get(url,key,token,"time_sessions",  `?project_id=in.(${ids})&order=started_at.desc`),
     sb.get(url,key,token,"issue_comments", `?project_id=in.(${ids})&order=created_at.asc`),
+    sb.get(url,key,token,"snippets",       `?project_id=in.(${ids})&order=created_at.desc`),
   ]);
   return rows.map(p=>({
     id:p.id,name:p.name,description:p.description,status:p.status,
@@ -283,6 +285,7 @@ async function loadProjects(url,key,token,userId){
     buildLogs:   builds.filter(b=>b.project_id===p.id).map(b=>({id:b.id,versionId:b.version_id,platform:b.platform,buildNumber:b.build_number,buildSize:b.build_size,status:b.status,store:b.store,notes:b.notes,builtAt:b.built_at,createdAt:b.created_at})),
     environments:envs.filter(e=>e.project_id===p.id).map(e=>({id:e.id,name:e.name,url:e.url,color:e.color,variables:e.variables||[],notes:e.notes,position:e.position,createdAt:e.created_at})),
     dependencies:deps.filter(d=>d.project_id===p.id).map(d=>({id:d.id,name:d.name,currentVersion:d.current_version,latestVersion:d.latest_version,type:d.type,status:d.status,notes:d.notes,createdAt:d.created_at})),
+    snippets:    (snippets||[]).filter(s=>s.project_id===p.id).map(s=>({id:s.id,title:s.title,language:s.language,content:s.content,tags:s.tags||[],createdAt:s.created_at})),
   }));
 }
 
@@ -349,6 +352,89 @@ function generateChangelog(project){
     md+="\n---\n\n";
   });
   return md.trim();
+}
+
+// ── Snippet languages ─────────────────────────────────────────────────────────
+const SNIPPET_LANGUAGES=[
+  "javascript","typescript","jsx","tsx","python","kotlin","swift","java",
+  "html","css","sql","bash","json","yaml","markdown","rust","go","cpp","other",
+];
+
+// ── README generator ──────────────────────────────────────────────────────────
+function generateReadme(project){
+  const statusEmoji={planning:"📋","in-dev":"🚧",beta:"🧪",released:"✅",archived:"📦"};
+  const latVer=project.versions?.[0];
+  const openIssues=(project.issues||[]).filter(i=>i.status==="open");
+  const msTotal=project.milestones?.length||0;
+  const msDone=(project.milestones||[]).filter(m=>m.completed).length;
+  const links=[];
+  if(project.gitUrl)links.push(`[Repository](${project.gitUrl})`);
+  if(project.vercelUrl)links.push(`[Live Demo](${project.vercelUrl})`);
+  if(project.supabaseUrl)links.push(`[Database Dashboard](${project.supabaseUrl})`);
+
+  let md=`# ${project.name}\n\n`;
+  md+=`${statusEmoji[project.status]||"📋"} **${STATUS_CONFIG[project.status]?.label||project.status}**`;
+  if(latVer) md+=` · \`v${latVer.version}\``;
+  md+="\n\n";
+  if(project.description) md+=`> ${project.description}\n\n`;
+  if(links.length) md+=links.join("  ·  ")+"\n\n";
+
+  if(project.techStack?.length){
+    md+="## Tech Stack\n\n";
+    md+=project.techStack.map(t=>`- **${t}**`).join("\n")+"\n\n";
+  }
+
+  if(latVer){
+    md+="## Current Version\n\n";
+    md+=`**v${latVer.version}** — ${new Date(latVer.date).toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"})}\n`;
+    if(latVer.releaseNotes) md+=`\n${latVer.releaseNotes}\n`;
+    md+="\n";
+  }
+
+  if(msTotal>0){
+    md+="## Progress\n\n";
+    md+=`${msDone} of ${msTotal} milestones complete`;
+    if(msTotal>0) md+=` (${Math.round(msDone/msTotal*100)}%)`;
+    md+="\n\n";
+    const pending=(project.milestones||[]).filter(m=>!m.completed).slice(0,5);
+    if(pending.length){
+      md+="**Upcoming milestones:**\n";
+      md+=pending.map(m=>`- ${m.title}${m.date?` *(${new Date(m.date).toLocaleDateString()})*`:""}`).join("\n")+"\n\n";
+    }
+  }
+
+  // Pull any note with setup/install keywords as a Getting Started section
+  const setupNote=(project.notes||[]).find(n=>/(setup|install|usage|getting started|how to run)/i.test(n.content));
+  if(setupNote){
+    md+="## Getting Started\n\n";
+    md+=setupNote.content.slice(0,1000)+(setupNote.content.length>1000?"\n\n*(continued in project notes)*":"")+"\n\n";
+  }
+
+  if(openIssues.length){
+    md+="## Known Issues\n\n";
+    md+=openIssues.slice(0,8).map(i=>`- **[${(i.priority||"medium").toUpperCase()}]** ${i.title}${i.description?` — ${i.description.slice(0,80)}`:""}`).join("\n")+"\n\n";
+  }
+
+  if(project.versions?.length>1){
+    md+="## Version History\n\n";
+    project.versions.slice(0,6).forEach(v=>{
+      md+=`### v${v.version} — ${new Date(v.date).toLocaleDateString()}\n`;
+      if(v.releaseNotes)md+=`${v.releaseNotes.slice(0,300)}\n`;
+      md+="\n";
+    });
+  }
+
+  md+="---\n\n*Generated by [Qoder](https://qoder.dev) "+new Date().toLocaleDateString()+"*\n";
+  return md;
+}
+
+function downloadReadme(project){
+  const md=generateReadme(project);
+  const blob=new Blob([md],{type:"text/markdown"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download=`${project.name.toLowerCase().replace(/\s+/g,"-")}-README.md`;
+  a.click();URL.revokeObjectURL(url);
 }
 
 // ── Lightweight markdown renderer ─────────────────────────────────────────────
@@ -824,7 +910,7 @@ export default function QoderApp() {
     const position=projects.length;
     try{
       const row=await sb.post(cfg.url,cfg.key,T(),"projects",{user_id:session.user.id,name:p.name,description:p.description||null,status:p.status||"planning",tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,color:p.color||null,position,is_public:false});
-      const proj={id:row.id,name:row.name,description:row.description,status:row.status,techStack:row.tech_stack||[],localFolder:row.local_folder||null,gitUrl:row.git_url||"",supabaseUrl:row.supabase_url||"",vercelUrl:row.vercel_url||"",isPublic:false,publicSlug:null,color:row.color||null,position:row.position,createdAt:row.created_at,versions:[],milestones:[],notes:[],todos:[],assets:[],issues:[],ideas:[],concepts:[],buildLogs:[],environments:[],dependencies:[],tagIds:[],sprints:[],timeSessions:[]};
+      const proj={id:row.id,name:row.name,description:row.description,status:row.status,techStack:row.tech_stack||[],localFolder:row.local_folder||null,gitUrl:row.git_url||"",supabaseUrl:row.supabase_url||"",vercelUrl:row.vercel_url||"",isPublic:false,publicSlug:null,color:row.color||null,position:row.position,createdAt:row.created_at,versions:[],milestones:[],notes:[],todos:[],assets:[],issues:[],ideas:[],concepts:[],buildLogs:[],environments:[],dependencies:[],tagIds:[],sprints:[],timeSessions:[],snippets:[]};
       setProjects(ps=>[...ps,proj]);
       showToast("Project created");
       // If created from template, apply template data
@@ -908,7 +994,28 @@ export default function QoderApp() {
     }catch(e){showToast(e.message,"err");}
   };
 
-  // ── Issue comments ────────────────────────────────────────────────────────────
+  // ── Snippets ──────────────────────────────────────────────────────────────────
+  const addSnippet=async(pid,sn)=>{
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"snippets",{project_id:pid,title:sn.title,language:sn.language||"javascript",content:sn.content,tags:sn.tags||[]});
+      mutate(pid,p=>({...p,snippets:[{id:row.id,title:row.title,language:row.language,content:row.content,tags:row.tags||[],createdAt:row.created_at},...(p.snippets||[])]}));
+      showToast("Snippet saved");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const updateSnippet=async(pid,sid,sn)=>{
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"snippets",sid,{title:sn.title,language:sn.language,content:sn.content,tags:sn.tags||[]});
+      mutate(pid,p=>({...p,snippets:p.snippets.map(s=>s.id===sid?{...s,...sn}:s)}));
+      showToast("Snippet updated");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const deleteSnippet=async(pid,sid)=>{
+    try{
+      await sb.del(cfg.url,cfg.key,T(),"snippets",sid);
+      mutate(pid,p=>({...p,snippets:p.snippets.filter(s=>s.id!==sid)}));
+      showToast("Snippet deleted");
+    }catch(e){showToast(e.message,"err");}
+  };
   const addIssueComment=async(pid,iid,content)=>{
     try{
       const row=await sb.post(cfg.url,cfg.key,T(),"issue_comments",{issue_id:iid,project_id:pid,content});
@@ -1342,6 +1449,11 @@ export default function QoderApp() {
             onOpenSaveTemplate={()=>openModal("save-template",{name:`${liveProj.name} Template`})}
             onExportJSON={()=>exportProjectJSON(liveProj)}
             onExportPDF={()=>exportProjectPDF(liveProj)}
+            onExportReadme={()=>downloadReadme(liveProj)}
+            onAddSnippet={()=>openModal("add-snippet",{language:"javascript",tags:[]})}
+            onEditSnippet={sn=>openModal("edit-snippet",{...sn})}
+            onDeleteSnippet={sid=>deleteSnippet(liveProj.id,sid)}
+            onSaveSnippet={(sn)=>{addSnippet(liveProj.id,sn);closeModal();}}
             onTogglePublic={()=>togglePublic(liveProj.id)}
             onCopyPublicLink={()=>{
               // In Electron, location.origin is file:// — use a placeholder or cfg URL
@@ -1367,7 +1479,8 @@ export default function QoderApp() {
         {modal==="add-asset"    &&<AssetForm     data={form} setData={setForm} onSubmit={d=>{addAsset(selProj.id,d);closeModal();}}                                       onCancel={closeModal}/>}
         {modal==="add-issue"    &&<IssueForm     data={form} setData={setForm} onSubmit={d=>{addIssue(selProj.id,d);closeModal();}}                                       onCancel={closeModal}/>}
         {modal==="fix-issue"    &&<FixIssueModal data={form} setData={setForm} onSubmit={d=>{fixIssue(selProj.id,d.id,d.fixDescription);closeModal();}}                  onCancel={closeModal}/>}
-        {modal==="add-sprint"    &&<SprintForm    data={form} setData={setForm} onSubmit={d=>{addSprint(selProj.id,d);closeModal();}} onCancel={closeModal}/>}
+        {modal==="add-snippet"   &&<SnippetForm   data={form} setData={setForm} onSubmit={d=>{addSnippet(selProj.id,d);closeModal();}}                          onCancel={closeModal}/>}
+        {modal==="edit-snippet"  &&<SnippetForm   data={form} setData={setForm} isEdit onSubmit={d=>{updateSnippet(selProj.id,d.id,d);closeModal();}}             onCancel={closeModal}/>}
         {modal==="add-env"      &&<EnvironmentForm data={form} setData={setForm} title="Add Environment" onSubmit={d=>{addEnvironment(selProj.id,d);closeModal();}}      onCancel={closeModal}/>}
         {modal==="edit-env"     &&<EnvironmentForm data={form} setData={setForm} title="Edit Environment" onSubmit={d=>{updateEnvironment(selProj.id,d.id,d);closeModal();}} onCancel={closeModal}/>}
         {modal==="add-dep"      &&<DependencyForm data={form} setData={setForm} onSubmit={d=>{addDependency(selProj.id,d);closeModal();}}                                  onCancel={closeModal}/>}
@@ -1617,7 +1730,7 @@ function ScrollableTabBar({children,isMobile}){
 }
 
 // ── ProjectView ───────────────────────────────────────────────────────────────
-function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onDelete}){
+function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onDelete}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
@@ -1633,6 +1746,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
     "build-log":project.buildLogs?.length||0,
     environments:project.environments?.length||0,
     dependencies:project.dependencies?.filter(d=>d.status!=="ok").length||0,
+    snippets:project.snippets?.length||0,
     time:project.timeSessions?.length||0,
     ideas:project.ideas?.length||0,
     concepts:project.concepts?.length||0,
@@ -1676,6 +1790,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
           {!isMobile&&<>
             <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportPDF}>PDF</button>
             <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportJSON}>Export JSON</button>
+            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportReadme} title="Download README.md">README</button>
             <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12,color:project.isPublic?"#4ADE80":undefined}} onClick={onTogglePublic}>{project.isPublic?"Public":"Private"}</button>
             <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onOpenSaveTemplate}>Save Template</button>
           </>}
@@ -1701,6 +1816,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
       {tab==="milestones" &&<MilestonesTab project={project} onAdd={onAddMilestone} onToggle={onToggleMilestone} onDelete={onDeleteMilestone}/>}
       {tab==="sprints"    &&<SprintsTab    project={project} onAdd={onAddSprint} onUpdateStatus={onUpdateSprintStatus} onDelete={onDeleteSprint} onAssignTodo={onAssignTodoToSprint}/>}
       {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint}/>}
+      {tab==="snippets"   &&<SnippetsTab   project={project} onAdd={onAddSnippet} onEdit={onEditSnippet} onDelete={onDeleteSnippet}/>}
       {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession}/>}
       {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes}/>}
       {tab==="assets"     &&<AssetsTab     project={project} onAdd={onAddAsset}     onDelete={onDeleteAsset}    onUploadFile={onUploadAssetFile} onLightbox={onLightbox}/>}
@@ -2205,61 +2321,126 @@ function SprintsTab({project,onAdd,onUpdateStatus,onDelete,onAssignTodo}){
 // ── Time Tab ──────────────────────────────────────────────────────────────────
 function TimeTab({project,onStart,onStop,onDelete}){
   const sessions=project.timeSessions||[];
-  const [running,setRunning]=useState(null); // {id, startedAt}
+  const [running,setRunning]=useState(null);
   const [elapsed,setElapsed]=useState(0);
   const [stopNote,setStopNote]=useState("");
+  const [view,setView]=useState("timer"); // "timer"|"pomodoro"
+  // Pomodoro state
+  const [pomMode,setPomMode]=useState("work"); // "work"|"break"
+  const [pomSecs,setPomSecs]=useState(25*60);
+  const [pomActive,setPomActive]=useState(false);
+  const [pomSession,setPomSession]=useState(null); // open time_session id for current pomodoro
+  const [pomCycles,setPomCycles]=useState(0);
+  const POM_WORK=25*60,POM_BREAK=5*60,POM_LONG_BREAK=15*60;
 
-  // Detect any open session (no endedAt)
   const openSession=sessions.find(s=>!s.endedAt);
-  useEffect(()=>{
-    if(openSession){setRunning({id:openSession.id,startedAt:openSession.startedAt});}
-    else{setRunning(null);setElapsed(0);}
-  },[openSession?.id]);
+  useEffect(()=>{if(openSession){setRunning({id:openSession.id,startedAt:openSession.startedAt});}else{setRunning(null);setElapsed(0);};},[openSession?.id]);
+  useEffect(()=>{if(!running)return;const iv=setInterval(()=>setElapsed(Math.round((Date.now()-new Date(running.startedAt))/1000)),500);return()=>clearInterval(iv);},[running]);
 
+  // Pomodoro countdown
   useEffect(()=>{
-    if(!running)return;
-    const iv=setInterval(()=>setElapsed(Math.round((Date.now()-new Date(running.startedAt))/1000)),500);
+    if(!pomActive)return;
+    const iv=setInterval(()=>{
+      setPomSecs(s=>{
+        if(s<=1){
+          clearInterval(iv);
+          // Auto-switch mode
+          if(pomMode==="work"){
+            const newCycles=pomCycles+1;setPomCycles(newCycles);
+            const breakLen=newCycles%4===0?POM_LONG_BREAK:POM_BREAK;
+            setPomMode("break");setPomSecs(breakLen);
+            // Stop the time session
+            if(pomSession){onStop(pomSession,`Pomodoro #${newCycles} completed`);setPomSession(null);}
+            try{new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAA").play();}catch{}
+          } else {
+            setPomMode("work");setPomSecs(POM_WORK);
+          }
+          setPomActive(false);
+          return 0;
+        }
+        return s-1;
+      });
+    },1000);
     return()=>clearInterval(iv);
-  },[running]);
+  },[pomActive,pomMode,pomCycles,pomSession]);
+
+  const startPomodoro=async()=>{
+    if(pomMode==="work"){const sess=await onStart();if(sess)setPomSession(sess.id);}
+    setPomActive(true);
+  };
+  const pausePomodoro=()=>setPomActive(false);
+  const resetPomodoro=()=>{setPomActive(false);setPomMode("work");setPomSecs(POM_WORK);if(pomSession){onStop(pomSession,"Pomodoro cancelled");setPomSession(null);}};
 
   const totalSeconds=sessions.filter(s=>s.durationSeconds).reduce((a,s)=>a+s.durationSeconds,0);
   const today=new Date().toDateString();
   const todaySeconds=sessions.filter(s=>s.durationSeconds&&new Date(s.startedAt).toDateString()===today).reduce((a,s)=>a+s.durationSeconds,0);
-
-  const handleStop=async()=>{
-    if(!running)return;
-    await onStop(running.id,stopNote);
-    setStopNote("");setRunning(null);setElapsed(0);
-  };
+  const handleStop=async()=>{if(!running)return;await onStop(running.id,stopNote);setStopNote("");setRunning(null);setElapsed(0);};
 
   const grouped=sessions.filter(s=>s.endedAt).reduce((acc,s)=>{
     const d=new Date(s.startedAt).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
     if(!acc[d])acc[d]=[];acc[d].push(s);return acc;
   },{});
 
+  const pomPct=pomMode==="work"?((POM_WORK-pomSecs)/POM_WORK*100):(pomMode==="break"&&pomSecs>POM_BREAK)?(((POM_LONG_BREAK-pomSecs)/POM_LONG_BREAK)*100):(((POM_BREAK-pomSecs)/POM_BREAK)*100);
+  const pomColor=pomMode==="work"?"#00D4FF":"#4ADE80";
+
   return(
     <div>
-      <div style={s.tabBar}><span style={s.mono12}>Total: {fmtDuration(totalSeconds)} · Today: {fmtDuration(todaySeconds)}</span></div>
-
-      {/* Timer card */}
-      <div className="q-ver-card" style={{marginBottom:20,borderLeft:`3px solid ${running?"#4ADE80":"var(--border-md)"}`}}>
-        <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
-          <div style={{fontFamily:"'JetBrains Mono'",fontSize:28,fontWeight:700,color:running?"#4ADE80":"#6B7290",letterSpacing:2,minWidth:90}}>
-            {running?fmtDurationLong(elapsed):"00:00:00"}
-          </div>
-          {!running?(
-            <button className="q-btn-primary" style={{padding:"10px 24px",fontSize:14}} onClick={onStart}>Start Timer</button>
-          ):(
-            <div style={{display:"flex",gap:8,flex:1,flexWrap:"wrap"}}>
-              <input className="q-input" style={{flex:1,minWidth:160,marginTop:0,fontSize:13}} value={stopNote} onChange={e=>setStopNote(e.target.value)} placeholder="What did you work on? (optional)"/>
-              <button className="q-btn-danger" style={{padding:"10px 18px",fontSize:13,borderColor:"#FF4466",color:"#FF7090"}} onClick={handleStop}>Stop</button>
-            </div>
-          )}
+      <div style={s.tabBar}>
+        <span style={s.mono12}>Total: {fmtDuration(totalSeconds)} · Today: {fmtDuration(todaySeconds)}</span>
+        <div style={{display:"flex",gap:6}}>
+          <button className={`q-chip${view==="timer"?" q-chip-on":""}`} onClick={()=>setView("timer")}>Stopwatch</button>
+          <button className={`q-chip${view==="pomodoro"?" q-chip-on":""}`} onClick={()=>setView("pomodoro")}>Pomodoro</button>
         </div>
-        {running&&<p style={{...s.mono10,marginTop:10,color:"#4B5268"}}>Started {new Date(running.startedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>}
       </div>
 
-      {/* Session history */}
+      {view==="timer"&&(
+        <div className="q-ver-card" style={{marginBottom:20,borderLeft:`3px solid ${running?"#4ADE80":"var(--border-md)"}`}}>
+          <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+            <div style={{fontFamily:"'JetBrains Mono'",fontSize:28,fontWeight:700,color:running?"#4ADE80":"var(--txt-muted)",letterSpacing:2,minWidth:90}}>{running?fmtDurationLong(elapsed):"00:00:00"}</div>
+            {!running
+              ?<button className="q-btn-primary" style={{padding:"10px 24px",fontSize:14}} onClick={onStart}>Start Timer</button>
+              :<div style={{display:"flex",gap:8,flex:1,flexWrap:"wrap"}}>
+                <input className="q-input" style={{flex:1,minWidth:160,marginTop:0,fontSize:13}} value={stopNote} onChange={e=>setStopNote(e.target.value)} placeholder="What did you work on? (optional)"/>
+                <button className="q-btn-danger" style={{padding:"10px 18px",fontSize:13,borderColor:"#FF4466",color:"#FF7090"}} onClick={handleStop}>Stop</button>
+              </div>
+            }
+          </div>
+          {running&&<p style={{...s.mono10,marginTop:10,color:"var(--txt-faint)"}}>Started {new Date(running.startedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>}
+        </div>
+      )}
+
+      {view==="pomodoro"&&(
+        <div className="q-ver-card" style={{marginBottom:20,textAlign:"center",padding:"24px 20px"}}>
+          <div style={{display:"flex",gap:12,justifyContent:"center",marginBottom:16}}>
+            <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:12,background:pomMode==="work"?"var(--accent-dim)":"transparent",border:`1px solid ${pomMode==="work"?"var(--accent)":"var(--border-md)"}`,color:pomMode==="work"?"var(--accent)":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'"}} onClick={()=>{if(!pomActive){setPomMode("work");setPomSecs(POM_WORK);}}}>Work 25m</span>
+            <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:12,background:pomMode==="break"?"rgba(74,222,128,.1)":"transparent",border:`1px solid ${pomMode==="break"?"#4ADE80":"var(--border-md)"}`,color:pomMode==="break"?"#4ADE80":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'"}} onClick={()=>{if(!pomActive){setPomMode("break");setPomSecs(POM_BREAK);}}}>Break 5m</span>
+          </div>
+          {/* Circular progress */}
+          <svg width={120} height={120} style={{display:"block",margin:"0 auto 16px"}}>
+            <circle cx={60} cy={60} r={52} fill="none" stroke="var(--border)" strokeWidth={8}/>
+            <circle cx={60} cy={60} r={52} fill="none" stroke={pomColor} strokeWidth={8} strokeLinecap="round"
+              strokeDasharray={`${2*Math.PI*52}`} strokeDashoffset={`${2*Math.PI*52*(1-pomPct/100)}`}
+              transform="rotate(-90 60 60)" style={{transition:"stroke-dashoffset .5s"}}/>
+            <text x={60} y={55} textAnchor="middle" fontFamily="'JetBrains Mono'" fontWeight={700} fontSize={18} fill={pomColor}>
+              {String(Math.floor(pomSecs/60)).padStart(2,"0")}:{String(pomSecs%60).padStart(2,"0")}
+            </text>
+            <text x={60} y={73} textAnchor="middle" fontFamily="'Syne'" fontSize={10} fill="var(--txt-muted)">
+              {pomMode==="work"?"FOCUS":"BREAK"}
+            </text>
+          </svg>
+          <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+            {!pomActive
+              ?<button className="q-btn-primary" style={{padding:"9px 24px"}} onClick={startPomodoro}>{pomSecs<(pomMode==="work"?POM_WORK:POM_BREAK)?"Resume":"Start"}</button>
+              :<button className="q-btn-ghost" style={{padding:"9px 20px"}} onClick={pausePomodoro}>Pause</button>
+            }
+            <button className="q-btn-ghost" style={{padding:"9px 16px"}} onClick={resetPomodoro}>Reset</button>
+          </div>
+          {pomCycles>0&&<p style={{...s.mono10,marginTop:14,color:"var(--txt-muted)"}}>{pomCycles} pomodoro{pomCycles!==1?"s":""} completed today · {fmtDuration(pomCycles*25*60)} focused</p>}
+          <p style={{...s.mono10,marginTop:6,color:"var(--txt-faint)"}}>Work sessions auto-log to your time tracker</p>
+        </div>
+      )}
+
       {Object.keys(grouped).length===0?<div style={s.empty}><p>No sessions logged yet.</p></div>:(
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
           {Object.entries(grouped).map(([date,daySessions])=>{
@@ -2267,20 +2448,20 @@ function TimeTab({project,onStart,onStop,onDelete}){
             return(
               <div key={date}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <span style={{fontFamily:"'Syne'",fontWeight:700,color:"#C0C6E0",fontSize:13}}>{date}</span>
-                  <span style={{...s.mono10,color:"#6B7290"}}>{fmtDuration(dayTotal)}</span>
+                  <span style={{fontFamily:"'Syne'",fontWeight:700,color:"var(--txt)",fontSize:13}}>{date}</span>
+                  <span style={{...s.mono10,color:"var(--txt-muted)"}}>{fmtDuration(dayTotal)}</span>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                  {daySessions.map(s=>(
-                    <div key={s.id} className="q-ms-row" style={{padding:"8px 10px"}}>
+                  {daySessions.map(se=>(
+                    <div key={se.id} className="q-ms-row" style={{padding:"8px 10px"}}>
                       <div style={{flex:1}}>
                         <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                          <span style={{fontFamily:"'JetBrains Mono'",fontSize:13,fontWeight:700,color:"#00D4FF"}}>{fmtDuration(s.durationSeconds)}</span>
-                          {s.note&&<span style={{fontSize:13,color:"#B8BDD4"}}>{s.note}</span>}
+                          <span style={{fontFamily:"'JetBrains Mono'",fontSize:13,fontWeight:700,color:"var(--accent)"}}>{fmtDuration(se.durationSeconds)}</span>
+                          {se.note&&<span style={{fontSize:13,color:"var(--txt-sub)"}}>{se.note}</span>}
                         </div>
-                        <p style={{...s.mono10,marginTop:3,color:"#4B5268"}}>{new Date(s.startedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} → {new Date(s.endedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>
+                        <p style={{...s.mono10,marginTop:3,color:"var(--txt-faint)"}}>{new Date(se.startedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} → {new Date(se.endedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>
                       </div>
-                      <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this session?"))onDelete(s.id);}}>✕</button>
+                      <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this session?"))onDelete(se.id);}}>✕</button>
                     </div>
                   ))}
                 </div>
@@ -2289,6 +2470,102 @@ function TimeTab({project,onStart,onStop,onDelete}){
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Snippets Tab ──────────────────────────────────────────────────────────────
+function SnippetsTab({project,onAdd,onEdit,onDelete}){
+  const [search,setSearch]=useState("");
+  const [langFilter,setLangFilter]=useState("all");
+  const snippets=project.snippets||[];
+
+  const langs=["all",...new Set(snippets.map(s=>s.language))];
+  const filtered=snippets.filter(s=>{
+    const matchLang=langFilter==="all"||s.language===langFilter;
+    const matchSearch=!search.trim()||(s.title+s.content+(s.tags||[]).join(" ")).toLowerCase().includes(search.toLowerCase());
+    return matchLang&&matchSearch;
+  });
+
+  return(
+    <div>
+      <div style={s.tabBar}>
+        <span style={s.mono12}>{snippets.length} snippet{snippets.length!==1?"s":""}</span>
+        <button className="q-btn-primary" onClick={onAdd}>+ Add Snippet</button>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+        <input className="q-input" style={{flex:1,minWidth:160,marginTop:0}} placeholder="Search snippets…" value={search} onChange={e=>setSearch(e.target.value)}/>
+        <select className="q-input" style={{width:150,marginTop:0,fontSize:13}} value={langFilter} onChange={e=>setLangFilter(e.target.value)}>
+          {langs.map(l=><option key={l} value={l}>{l==="all"?"All Languages":l}</option>)}
+        </select>
+      </div>
+      {snippets.length===0&&<div style={s.empty}><p>No snippets yet. Add reusable code blocks here.</p></div>}
+      {filtered.length===0&&snippets.length>0&&<div style={s.empty}><p>No snippets match your search.</p></div>}
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {filtered.map(sn=><SnippetCard key={sn.id} snippet={sn} onEdit={()=>onEdit(sn)} onDelete={async()=>{if(await qConfirm(`Delete snippet "${sn.title}"?`))onDelete(sn.id);}}/>)}
+      </div>
+    </div>
+  );
+}
+
+function SnippetCard({snippet,onEdit,onDelete}){
+  const [copied,setCopied]=useState(false);
+  const copy=()=>{navigator.clipboard.writeText(snippet.content).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2000);}).catch(()=>{});};
+  const LANG_COLORS={javascript:"#F7DF1E",typescript:"#3178C6",python:"#3776AB",kotlin:"#7F52FF",swift:"#F05138",html:"#E34F26",css:"#1572B6",sql:"#4479A1",bash:"#4EAA25",rust:"#CE422B",go:"#00ADD8",java:"#ED8B00",jsx:"#61DAFB",tsx:"#3178C6"};
+  const langColor=LANG_COLORS[snippet.language]||"var(--txt-muted)";
+  return(
+    <div className="q-ver-card">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+        <div style={{flex:1}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+            <span style={{fontFamily:"'Syne'",fontWeight:700,fontSize:14,color:"var(--txt)"}}>{snippet.title}</span>
+            <span style={{fontFamily:"'JetBrains Mono'",fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:4,background:`${langColor}18`,border:`1px solid ${langColor}40`,color:langColor}}>{snippet.language}</span>
+          </div>
+          {(snippet.tags||[]).length>0&&(
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {snippet.tags.map((t,i)=><span key={i} style={{fontSize:10,padding:"1px 7px",borderRadius:10,background:"var(--accent-dim)",border:"1px solid var(--accent-border)",color:"var(--accent)",fontFamily:"'JetBrains Mono'"}}>{t}</span>)}
+            </div>
+          )}
+        </div>
+        <div style={{display:"flex",gap:6,flexShrink:0}}>
+          <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={copy}>{copied?"✓ Copied":"Copy"}</button>
+          <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={onEdit}>Edit</button>
+          <button className="q-del" onClick={onDelete}>✕</button>
+        </div>
+      </div>
+      <pre style={{fontFamily:"'JetBrains Mono'",fontSize:12,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 14px",overflowX:"auto",margin:0,color:"var(--txt-sub)",lineHeight:1.6,maxHeight:200,overflowY:"auto",whiteSpace:"pre"}}>{snippet.content}</pre>
+      <div style={{...s.mono10,marginTop:6,color:"var(--txt-faint)"}}>{new Date(snippet.createdAt).toLocaleDateString()}</div>
+    </div>
+  );
+}
+
+function SnippetForm({data,setData,isEdit,onSubmit,onCancel}){
+  const set=(k,v)=>setData(d=>({...d,[k]:v}));
+  const [tagInput,setTagInput]=useState("");
+  const addTag=()=>{const t=tagInput.trim();if(t&&!(data.tags||[]).includes(t)){set("tags",[...(data.tags||[]),t]);}setTagInput("");};
+  const removeTag=(t)=>set("tags",(data.tags||[]).filter(x=>x!==t));
+  return(
+    <div>
+      <h2 style={s.modalTitle}>{isEdit?"Edit Snippet":"New Snippet"}</h2>
+      <Field label="Title *"><input className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., Auth middleware" autoFocus/></Field>
+      <Field label="Language">
+        <select className="q-input" value={data.language||"javascript"} onChange={e=>set("language",e.target.value)}>
+          {SNIPPET_LANGUAGES.map(l=><option key={l} value={l}>{l}</option>)}
+        </select>
+      </Field>
+      <Field label="Code *"><textarea className="q-input q-mono" style={{height:200,resize:"vertical",fontSize:13}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="// paste your code here…" spellCheck={false}/></Field>
+      <Field label="Tags">
+        <div style={{display:"flex",gap:8,marginTop:6}}>
+          <input className="q-input" style={{flex:1,marginTop:0}} value={tagInput} onChange={e=>setTagInput(e.target.value)} placeholder="Add tag…" onKeyDown={e=>{if(e.key==="Enter"||e.key===","){e.preventDefault();addTag();}}}/>
+          <button className="q-btn-ghost" style={{padding:"0 14px"}} onClick={addTag}>Add</button>
+        </div>
+        {(data.tags||[]).length>0&&(
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+            {(data.tags||[]).map((t,i)=><span key={i} style={{display:"flex",alignItems:"center",gap:5,padding:"2px 8px",borderRadius:10,background:"var(--accent-dim)",border:"1px solid var(--accent-border)",color:"var(--accent)",fontSize:11,fontFamily:"'JetBrains Mono'"}}>{t}<button onClick={()=>removeTag(t)} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:12,lineHeight:1,padding:0}}>✕</button></span>)}
+          </div>
+        )}
+      </Field>
+      <FormActions onCancel={onCancel} onSubmit={()=>data.title?.trim()&&data.content?.trim()&&onSubmit(data)} submitLabel={isEdit?"Save Changes":"Add Snippet"}/>
     </div>
   );
 }
