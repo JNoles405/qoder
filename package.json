@@ -34,7 +34,8 @@
     "publish": {
       "provider": "github",
       "owner": "JNoles405",
-      "repo": "qoder"
+      "repo": "qoder",
+      "releaseType": "release"
     },
     "mac": {
       "category": "public.app-category.developer-tools",
