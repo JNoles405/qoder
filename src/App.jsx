@@ -12,9 +12,49 @@ function useIsMobile() {
   return v;
 }
 
+// Pull-to-refresh for mobile (Capacitor WebView)
+function usePullToRefresh(onRefresh){
+  useEffect(()=>{
+    let startY=0,pulling=false,indicator=null;
+    const THRESHOLD=70;
+
+    const createIndicator=()=>{
+      const el=document.createElement("div");
+      el.id="ptr-indicator";
+      el.style.cssText="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:9998;background:var(--bg-side,#0C1020);border:1px solid var(--border,#1A2040);border-top:none;border-radius:0 0 20px 20px;padding:6px 18px 8px;font-family:'Syne',sans-serif;font-size:12px;color:var(--accent,#00D4FF);font-weight:600;pointer-events:none;transition:opacity .2s;opacity:0;";
+      el.textContent="↓ Pull to refresh";
+      document.body.appendChild(el);
+      return el;
+    };
+
+    const onTouchStart=e=>{startY=e.touches[0].clientY;pulling=window.scrollY===0||document.documentElement.scrollTop===0;};
+    const onTouchMove=e=>{
+      if(!pulling)return;
+      const dy=e.touches[0].clientY-startY;
+      if(dy<10)return;
+      if(!indicator)indicator=createIndicator();
+      const pct=Math.min(dy/THRESHOLD,1);
+      indicator.style.opacity=String(pct);
+      indicator.textContent=pct>=1?"↑ Release to refresh":"↓ Pull to refresh";
+    };
+    const onTouchEnd=e=>{
+      if(!pulling||!indicator)return;
+      const dy=e.changedTouches[0].clientY-startY;
+      if(dy>=THRESHOLD){indicator.textContent="Refreshing…";onRefresh().then(()=>{if(indicator){indicator.style.opacity="0";setTimeout(()=>{indicator?.remove();indicator=null;},300);}});}
+      else{indicator.style.opacity="0";setTimeout(()=>{indicator?.remove();indicator=null;},200);}
+      pulling=false;startY=0;
+    };
+
+    document.addEventListener("touchstart",onTouchStart,{passive:true});
+    document.addEventListener("touchmove",onTouchMove,{passive:true});
+    document.addEventListener("touchend",onTouchEnd,{passive:true});
+    return()=>{document.removeEventListener("touchstart",onTouchStart);document.removeEventListener("touchmove",onTouchMove);document.removeEventListener("touchend",onTouchEnd);indicator?.remove();};
+  },[onRefresh]);
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.5.0";
+const APP_VER    = "v0.6.0";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -73,17 +113,17 @@ const THEMES = {
     txtFaint: "#4B5268", txtDim:   "#2E3558", txtGhost: "#2A304A",
   },
   light: {
-    bg:       "#F4F6FB", bgSide:   "#FFFFFF", bgCard:   "#FFFFFF",
-    bgInput:  "#F8FAFF", bgModal:  "#FFFFFF",
-    border:   "#DDE3F0", borderMd: "#C8D0E8", borderLg: "#E4E9F4",
-    txt:      "#111827", txtSub:   "#4B5563", txtMuted: "#6B7280",
-    txtFaint: "#9CA3AF", txtDim:   "#D1D5DB", txtGhost: "#9CA3AF",
+    bg:       "#ECEEF5", bgSide:   "#E2E5F0", bgCard:   "#F5F6FC",
+    bgInput:  "#ECEEF8", bgModal:  "#F5F6FC",
+    border:   "#BDC5DC", borderMd: "#B0BAD4", borderLg: "#C8D0E8",
+    txt:      "#0F1729", txtSub:   "#374160", txtMuted: "#536080",
+    txtFaint: "#7080A0", txtDim:   "#9AA5BE", txtGhost: "#B0BAD0",
   },
 };
 
 function buildThemeCSS(themeName, accent="#00D4FF"){
   const t=THEMES[themeName]||THEMES.dark;
-  // Map old hardcoded hex values → CSS vars
+  const isLight=themeName==="light";
   return `
 :root {
   --bg:${t.bg}; --bg-side:${t.bgSide}; --bg-card:${t.bgCard};
@@ -92,10 +132,22 @@ function buildThemeCSS(themeName, accent="#00D4FF"){
   --txt:${t.txt}; --txt-sub:${t.txtSub}; --txt-muted:${t.txtMuted};
   --txt-faint:${t.txtFaint}; --txt-dim:${t.txtDim}; --txt-ghost:${t.txtGhost};
   --accent:${accent}; --accent-dim:${accent}1A; --accent-border:${accent}30;
-  --scrollbar:${themeName==="light"?"#C8D0E8":"#1E2540"};
+  --scrollbar:${isLight?"#A8B4CC":"#1E2540"};
+  --shadow:${isLight?"0 1px 4px rgba(0,0,0,.10)":"none"};
+  --overlay:${isLight?"rgba(60,70,100,.55)":"rgba(4,6,14,.88)"};
+  --toast-ok-bg:${isLight?"#E8FAF0":"#0F2A1A"};
+  --toast-err-bg:${isLight?"#FEE8EE":"#2A0F18"};
+  --toast-info-bg:${isLight?"#E8F4FF":"#0F1A2A"};
+  --update-ok-bg:${isLight?"#E8FAF0":"#0F2A1A"};
+  --update-info-bg:${isLight?"#E8F4FF":"#0F1A2A"};
 }
+body{background:var(--bg);color:var(--txt);}
 ::-webkit-scrollbar-track{background:var(--bg)!important;}
 ::-webkit-scrollbar-thumb{background:var(--scrollbar)!important;}
+${isLight?`.q-ver-card,.q-card{box-shadow:var(--shadow);}
+.q-ms-row:hover{background:rgba(0,0,0,.05)!important;}
+.q-check{border-color:#A0AACC!important;}
+input[type=color]{filter:brightness(0.97);}`:``}
 `;
 }
 
@@ -312,16 +364,16 @@ function renderMarkdown(text){
       const lang=l.slice(3).trim();
       const block=[];i++;
       while(i<lines.length&&!lines[i].startsWith("```")){block.push(lines[i]);i++;}
-      out.push(<pre key={i} style={{fontFamily:"'JetBrains Mono'",fontSize:12,background:"#0A0E1A",border:"1px solid #1A2040",borderRadius:8,padding:"12px 14px",overflowX:"auto",margin:"10px 0",color:"#B8BDD4",lineHeight:1.7}}><code>{block.join("\n")}</code></pre>);
+      out.push(<pre key={i} style={{fontFamily:"'JetBrains Mono'",fontSize:12,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"12px 14px",overflowX:"auto",margin:"10px 0",color:"#B8BDD4",lineHeight:1.7}}><code>{block.join("\n")}</code></pre>);
       i++;continue;
     }
     // HR
-    if(/^---+$/.test(l.trim())){out.push(<hr key={i} style={{border:"none",borderTop:"1px solid #1A2040",margin:"16px 0"}}/>);i++;continue;}
+    if(/^---+$/.test(l.trim())){out.push(<hr key={i} style={{border:"none",borderTop:"1px solid var(--border)",margin:"16px 0"}}/>);i++;continue;}
     // Headings
     const hm=l.match(/^(#{1,3})\s+(.+)/);
     if(hm){const sz=[20,17,15][hm[1].length-1];out.push(<div key={i} style={{fontFamily:"'Syne'",fontWeight:700,fontSize:sz,color:"#E8EAF6",margin:`${hm[1].length===1?"18px":"12px"} 0 6px`}}>{inlinesMd(hm[2])}</div>);i++;continue;}
     // Blockquote
-    if(l.startsWith("> ")){out.push(<div key={i} style={{borderLeft:"3px solid #1E2540",paddingLeft:12,margin:"4px 0",color:"#8B8FA8",fontSize:13,lineHeight:1.6}}>{inlinesMd(l.slice(2))}</div>);i++;continue;}
+    if(l.startsWith("> ")){out.push(<div key={i} style={{borderLeft:"3px solid var(--border-md)",paddingLeft:12,margin:"4px 0",color:"var(--txt-sub)",fontSize:13,lineHeight:1.6}}>{inlinesMd(l.slice(2))}</div>);i++;continue;}
     // Unordered list
     if(/^[-*]\s/.test(l)){out.push(<div key={i} style={{display:"flex",gap:8,margin:"2px 0"}}><span style={{color:"#6B7290",flexShrink:0,marginTop:2}}>•</span><span style={{color:"#B8BDD4",fontSize:14,lineHeight:1.6}}>{inlinesMd(l.slice(2))}</span></div>);i++;continue;}
     // Numbered list
@@ -494,6 +546,37 @@ export default function QoderApp() {
   const sidebarDragRef = useRef(null);
   projRef.current = projects;
 
+  // JWT-aware API call wrapper — retries once after refresh on token expiry
+  const apiCall=useCallback(async(fn)=>{
+    try{ return await fn(); }
+    catch(e){
+      if(e.message&&(e.message.toLowerCase().includes("jwt")||e.message.toLowerCase().includes("expired")||e.message.toLowerCase().includes("401"))){
+        try{
+          const stored=await store.get(CFG_KEY);
+          if(stored){
+            const saved=JSON.parse(stored.value);
+            const res=await sb.refresh(cfg.url,cfg.key,saved.session?.refresh_token||session.refresh_token||"");
+            if(res.access_token){
+              const newSess={access_token:res.access_token,refresh_token:res.refresh_token,user:res.user};
+              setSession(newSess);await persistCfg(cfg,newSess);
+              return await fn(); // retry
+            }
+          }
+        }catch{}
+      }
+      throw e;
+    }
+  },[cfg,session]);
+
+  // Pull-to-refresh on mobile
+  const doRefresh=useCallback(async()=>{
+    try{
+      const pjs=await loadProjects(cfg.url,cfg.key,session.access_token,session.user.id);
+      setProjects(pjs);showToast("Refreshed","ok");
+    }catch{}
+  },[cfg,session]);
+  usePullToRefresh(isMobile?doRefresh:async()=>{});
+
   const saveTheme=(t)=>{setTheme(t);try{localStorage.setItem("q-theme",t);}catch{}};
   const saveAccent=(c)=>{setAccentColor(c);try{localStorage.setItem("q-accent",c);}catch{}};
   const applyCustomStatus=(key,label)=>setCustomStatuses(prev=>({...prev,[key]:label}));
@@ -611,7 +694,7 @@ export default function QoderApp() {
     }catch{}
   };
 
-  // ── Background sync ──────────────────────────────────────────────────────────
+  // ── Background sync + JWT auto-refresh ──────────────────────────────────────
   useEffect(()=>{
     if(screen!=="app"||!cfg||!session)return;
     const refresh=async()=>{
@@ -622,12 +705,28 @@ export default function QoderApp() {
         setUserTags(tags);
       }catch{}
     };
+    // JWT token refresh every 45 minutes to prevent expiry
+    const refreshJWT=async()=>{
+      try{
+        const stored=await store.get(CFG_KEY);
+        if(!stored)return;
+        const saved=JSON.parse(stored.value);
+        if(!saved.session?.refresh_token)return;
+        const res=await sb.refresh(cfg.url,cfg.key,saved.session.refresh_token);
+        if(res.access_token){
+          const newSess={access_token:res.access_token,refresh_token:res.refresh_token,user:res.user};
+          setSession(newSess);
+          await persistCfg(cfg,newSess);
+        }
+      }catch{}
+    };
     const onFocus=()=>refresh();
     const onVisible=()=>{if(!document.hidden)refresh();};
     window.addEventListener("focus",onFocus);
     document.addEventListener("visibilitychange",onVisible);
-    const iv=setInterval(refresh,POLL_MS);
-    return()=>{window.removeEventListener("focus",onFocus);document.removeEventListener("visibilitychange",onVisible);clearInterval(iv);};
+    const pollIv=setInterval(refresh,POLL_MS);
+    const jwtIv=setInterval(refreshJWT,45*60*1000); // 45 min
+    return()=>{window.removeEventListener("focus",onFocus);document.removeEventListener("visibilitychange",onVisible);clearInterval(pollIv);clearInterval(jwtIv);};
   },[screen,cfg,session]);
 
   // ── Keyboard shortcuts ───────────────────────────────────────────────────────
@@ -1102,14 +1201,14 @@ export default function QoderApp() {
 
       {/* Update banner */}
       {updateStatus==="ready"&&(
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:5000,background:"#0F2A1A",borderBottom:"1px solid #4ADE80",padding:"10px 20px",display:"flex",alignItems:"center",gap:12}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:5000,background:"var(--update-ok-bg)",borderBottom:"1px solid #4ADE80",padding:"10px 20px",display:"flex",alignItems:"center",gap:12}}>
           <span style={{color:"#4ADE80",fontFamily:"'Syne'",fontWeight:700,fontSize:14}}>✓ Update downloaded — restart to install</span>
           <button className="q-btn-primary" style={{padding:"6px 16px",fontSize:13}} onClick={()=>window.electronAPI?.installUpdate?.()}>Restart Now</button>
           <button className="q-btn-ghost" style={{padding:"6px 12px",fontSize:13}} onClick={()=>setUpdateStatus(null)}>Later</button>
         </div>
       )}
       {updateStatus==="available"&&(
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:5000,background:"#0F1A2A",borderBottom:"1px solid #00D4FF",padding:"8px 20px",display:"flex",alignItems:"center",gap:12}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:5000,background:"var(--update-info-bg)",borderBottom:"1px solid var(--accent)",padding:"8px 20px",display:"flex",alignItems:"center",gap:12}}>
           <span style={{color:"#00D4FF",fontFamily:"'Syne'",fontWeight:600,fontSize:13}}>↓ Update available — downloading in background</span>
           <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12,marginLeft:"auto"}} onClick={()=>setUpdateStatus(null)}>✕</button>
         </div>
@@ -1119,7 +1218,7 @@ export default function QoderApp() {
 
       {/* Collapsed sidebar — slim expand strip */}
       {!isMobile&&sidebarCollapsed&&(
-        <div style={{width:36,flexShrink:0,background:"#0C1020",borderRight:"1px solid #151C32",display:"flex",flexDirection:"column",alignItems:"center",paddingTop:16,gap:12,position:"sticky",top:0,height:"100vh",zIndex:1}}>
+        <div style={{width:36,flexShrink:0,background:"var(--bg-side)",borderRight:"1px solid var(--border-lg)",display:"flex",flexDirection:"column",alignItems:"center",paddingTop:16,gap:12,position:"sticky",top:0,height:"100vh",zIndex:1}}>
           <div style={{fontFamily:"'Syne'",fontSize:16,fontWeight:800,color:"#00D4FF",lineHeight:1}}>Q</div>
           <button onClick={toggleSidebarCollapse} title="Expand sidebar" style={{color:"#6B7290",fontSize:18,background:"none",border:"none",cursor:"pointer",marginTop:4}}>›</button>
         </div>
@@ -1396,7 +1495,7 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:5}}>
             {contentResults.slice(0,12).map((r,i)=>{const meta=FEED_META[r.type]||FEED_META.note;return(
-              <div key={i} onClick={()=>onOpen(allProjects.find(p=>p.id===r.projectId)||{})} style={{display:"flex",gap:10,padding:"10px 14px",background:"#111627",border:"1px solid #1A2040",borderRadius:9,cursor:"pointer",alignItems:"flex-start",transition:"border-color .2s"}} className="q-card">
+              <div key={i} onClick={()=>onOpen(allProjects.find(p=>p.id===r.projectId)||{})} style={{display:"flex",gap:10,padding:"10px 14px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:9,cursor:"pointer",alignItems:"flex-start",transition:"border-color .2s"}} className="q-card">
                 <span style={{fontSize:11,color:meta.color,flexShrink:0,marginTop:1}}>{meta.icon}</span>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}>
@@ -1438,7 +1537,7 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
             feedItems.length===0?<div style={{...s.empty,padding:"28px 0"}}><p>No activity in this period.</p></div>:(
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
                 {feedItems.slice(0,30).map((item,i)=>{const meta=FEED_META[item.type]||FEED_META.note;return(
-                  <div key={i} onClick={()=>onOpen(allProjects.find(p=>p.id===item.projectId)||{})} style={{display:"flex",gap:12,padding:"11px 14px",background:"#111627",border:"1px solid #1A2040",borderRadius:10,cursor:"pointer",alignItems:"flex-start"}} className="q-card">
+                  <div key={i} onClick={()=>onOpen(allProjects.find(p=>p.id===item.projectId)||{})} style={{display:"flex",gap:12,padding:"11px 14px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,cursor:"pointer",alignItems:"flex-start"}} className="q-card">
                     <div style={{width:26,height:26,borderRadius:6,background:`${meta.color}14`,border:`1px solid ${meta.color}28`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,flexShrink:0}}>{meta.icon}</div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
@@ -1650,7 +1749,7 @@ function OverviewTab({project,latestVer}){
       {items.length===0?<div style={s.empty}><p>No activity for this period.</p></div>:(
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
           {items.map(item=>{const meta=FEED_META[item.type]||FEED_META.note;return(
-            <div key={`${item.type}-${item.id}`} style={{display:"flex",gap:12,padding:"12px 14px",background:"#111627",border:"1px solid #1A2040",borderRadius:10,alignItems:"flex-start"}}>
+            <div key={`${item.type}-${item.id}`} style={{display:"flex",gap:12,padding:"12px 14px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,alignItems:"flex-start"}}>
               <div style={{width:28,height:28,borderRadius:6,background:`${meta.color}14`,border:`1px solid ${meta.color}28`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0,marginTop:1}}>{meta.icon}</div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
@@ -1773,7 +1872,7 @@ function TodoRow({todo,onToggle,onDelete,activeSprints,onAssignSprint}){
         {todo.completed&&todo.completedAt&&<p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4ADE80",marginTop:3,opacity:.75}}>✓ {new Date(todo.completedAt).toLocaleDateString()} at {new Date(todo.completedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>}
       </div>
       {activeSprints?.length>0&&!todo.completed&&(
-        <select value={todo.sprintId||""} onChange={e=>onAssignSprint(e.target.value||null)} style={{fontFamily:"'Syne'",fontSize:11,background:"#0D1120",border:"1px solid #1E2540",borderRadius:6,color:"#6B7290",padding:"2px 6px",cursor:"pointer"}}>
+        <select value={todo.sprintId||""} onChange={e=>onAssignSprint(e.target.value||null)} style={{fontFamily:"'Syne'",fontSize:11,background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:6,color:"var(--txt-muted)",padding:"2px 6px",cursor:"pointer"}}>
           <option value="">No Sprint</option>
           {activeSprints.map(sp=><option key={sp.id} value={sp.id}>{sp.name}</option>)}
         </select>
@@ -1851,7 +1950,7 @@ function AssetsTab({project,onAdd,onDelete,onUploadFile,onLightbox}){
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {items.map(asset=>(
                   <div key={asset.id} className="q-ms-row">
-                    {isImg(asset.url)&&<img src={asset.url} alt={asset.name} onClick={()=>onLightbox(asset.url,asset.name)} style={{width:48,height:48,objectFit:"cover",borderRadius:6,cursor:"pointer",flexShrink:0,border:"1px solid #1A2040"}}/>}
+                    {isImg(asset.url)&&<img src={asset.url} alt={asset.name} onClick={()=>onLightbox(asset.url,asset.name)} style={{width:48,height:48,objectFit:"cover",borderRadius:6,cursor:"pointer",flexShrink:0,border:"1px solid var(--border)"}}/>}
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{color:"#E8EAF6",fontWeight:500,fontSize:14}}>{asset.name}</div>
                       <a href={asset.url} target="_blank" rel="noreferrer" style={{...s.fileLink,marginTop:4,display:"inline-block",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>↗ {asset.url.length>60?asset.url.slice(0,60)+"…":asset.url}</a>
@@ -1904,14 +2003,14 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
                 </div>
                 {iss.description&&<p style={{color:"#8B8FA8",fontSize:13,lineHeight:1.6,marginBottom:8}}>{iss.description}</p>}
                 <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
-                  {PRIORITY_KEYS.map(pk=><button key={pk} onClick={()=>onUpdatePriority(iss.id,pk)} style={{fontSize:10,padding:"2px 8px",background:iss.priority===pk?PRIORITY_CONFIG[pk].bg:"transparent",border:`1px solid ${iss.priority===pk?PRIORITY_CONFIG[pk].color:"#1E2540"}`,borderRadius:12,color:iss.priority===pk?PRIORITY_CONFIG[pk].color:"#6B7290",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>{PRIORITY_CONFIG[pk].label}</button>)}
+                  {PRIORITY_KEYS.map(pk=><button key={pk} onClick={()=>onUpdatePriority(iss.id,pk)} style={{fontSize:10,padding:"2px 8px",background:iss.priority===pk?PRIORITY_CONFIG[pk].bg:"transparent",border:`1px solid ${iss.priority===pk?PRIORITY_CONFIG[pk].color:"var(--border-md)"}`,borderRadius:12,color:iss.priority===pk?PRIORITY_CONFIG[pk].color:"#6B7290",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>{PRIORITY_CONFIG[pk].label}</button>)}
                 </div>
                 {/* Screenshots */}
                 {(iss.screenshotUrls||[]).length>0&&(
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
                     {iss.screenshotUrls.map((url,i)=>(
                       <div key={i} style={{position:"relative",display:"inline-block"}}>
-                        <img src={url} alt={`Screenshot ${i+1}`} onClick={()=>onLightbox(url,`${iss.title} — screenshot ${i+1}`)} style={{width:80,height:80,objectFit:"cover",borderRadius:6,cursor:"pointer",border:"1px solid #1A2040"}}/>
+                        <img src={url} alt={`Screenshot ${i+1}`} onClick={()=>onLightbox(url,`${iss.title} — screenshot ${i+1}`)} style={{width:80,height:80,objectFit:"cover",borderRadius:6,cursor:"pointer",border:"1px solid var(--border)"}}/>
                         <button onClick={()=>onRemoveScreenshot(iss.id,url)} style={{position:"absolute",top:-6,right:-6,width:18,height:18,borderRadius:"50%",background:"#FF4466",border:"none",color:"#fff",fontSize:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
                       </div>
                     ))}
@@ -1921,17 +2020,17 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
                   <div style={{...s.mono10,color:"#2E3558"}}>Logged {new Date(iss.createdAt).toLocaleDateString()}</div>
                   <button onClick={()=>fileRefs.current[iss.id]?.click()} className="q-btn-ghost" style={{fontSize:11,padding:"2px 10px"}}>Add Screenshot</button>
                   <input ref={el=>fileRefs.current[iss.id]=el} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)onUploadScreenshot(iss.id,f);e.target.value="";}}/>
-                  <button onClick={()=>toggleComments(iss.id)} style={{fontSize:11,padding:"2px 10px",background:"transparent",border:"1px solid #1E2540",borderRadius:6,color:commentCount>0?"#00D4FF":"#6B7290",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>
+                  <button onClick={()=>toggleComments(iss.id)} style={{fontSize:11,padding:"2px 10px",background:"transparent",border:"1px solid var(--border-md)",borderRadius:6,color:commentCount>0?"var(--accent)":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>
                     {commentCount>0?`${commentCount} comment${commentCount!==1?"s":""}   ${isExpanded?"▲":"▼"}`:"Add Comment"}
                   </button>
                 </div>
                 {/* Comment thread */}
                 {isExpanded&&(
-                  <div style={{marginTop:12,borderTop:"1px solid #1A2040",paddingTop:12}}>
+                  <div style={{marginTop:12,borderTop:"1px solid var(--border)",paddingTop:12}}>
                     {(iss.comments||[]).map(c=>(
                       <div key={c.id} style={{display:"flex",gap:10,marginBottom:10,alignItems:"flex-start"}}>
                         <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(0,212,255,.1)",border:"1px solid rgba(0,212,255,.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#00D4FF",flexShrink:0,fontFamily:"'Syne'",fontWeight:700}}>U</div>
-                        <div style={{flex:1,background:"#0D1120",borderRadius:8,padding:"8px 12px"}}>
+                        <div style={{flex:1,background:"var(--bg-input)",borderRadius:8,padding:"8px 12px"}}>
                           <p style={{color:"#C0C6E0",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{c.content}</p>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6}}>
                             <span style={{...s.mono10,color:"#4B5268"}}>{new Date(c.createdAt).toLocaleString()}</span>
@@ -1969,7 +2068,7 @@ function IdeasTab({project,onAdd,onEdit,onPin,onDelete,onReorder}){
     <div>
       <div style={s.tabBar}><span style={s.mono12}>{ideas.length} {ideas.length===1?"idea":"ideas"} · {pinned.length} pinned</span><button className="q-btn-primary" onClick={onAdd}>+ Add Idea</button></div>
       {ideas.length===0&&<div style={s.empty}><p>No ideas yet.</p></div>}
-      {pinned.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#FFB347",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>⭐ Pinned</div>{pinned.map(idea=><IdeaRow key={idea.id} idea={idea} onPin={()=>onPin(idea.id)} onEdit={()=>onEdit(idea)} onDelete={async()=>{if(await qConfirm("Remove this idea?"))onDelete(idea.id);}}/>)}{rest.length>0&&<div style={{height:1,background:"#1A2040",margin:"16px 0"}}/>}</>}
+      {pinned.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#FFB347",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>⭐ Pinned</div>{pinned.map(idea=><IdeaRow key={idea.id} idea={idea} onPin={()=>onPin(idea.id)} onEdit={()=>onEdit(idea)} onDelete={async()=>{if(await qConfirm("Remove this idea?"))onDelete(idea.id);}}/>)}{rest.length>0&&<div style={{height:1,background:"var(--border)",margin:"16px 0"}}/>}</>}
       {rest.length>0&&<DraggableList items={rest} onReorder={r=>onReorder([...pinned,...r])}>{idea=><IdeaRow idea={idea} onPin={()=>onPin(idea.id)} onEdit={()=>onEdit(idea)} onDelete={async()=>{if(await qConfirm("Remove this idea?"))onDelete(idea.id);}}/>}</DraggableList>}
     </div>
   );
@@ -2012,13 +2111,13 @@ function ConceptsTab({project,onAdd,onDelete,onUploadFile,onLightbox}){
 function ConceptCard({concept,onDelete,onLightbox}){
   const isColor=concept.type==="color";const isImage=concept.type==="image";const isAudio=concept.type==="audio";const isCode=concept.type==="code";const isLink=concept.type==="link";
   return(
-    <div style={{background:"#111627",border:"1px solid #1A2040",borderRadius:10,padding:14,position:"relative"}} className="q-ver-card">
+    <div style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,padding:14,position:"relative"}} className="q-ver-card">
       <button className="q-del" onClick={onDelete} style={{position:"absolute",top:8,right:8}}>✕</button>
       {concept.label&&<div style={{fontSize:11,color:"#6B7290",marginBottom:8,paddingRight:20,fontWeight:600}}>{concept.label}</div>}
       {isColor&&<><div style={{width:"100%",height:72,borderRadius:6,background:concept.content,marginBottom:8,boxShadow:"inset 0 0 0 1px rgba(255,255,255,.08)"}}/><div style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#E8EAF6"}}>{concept.content}</div></>}
       {isImage&&<img src={concept.content} alt={concept.label||"concept"} onClick={()=>onLightbox(concept.content,concept.label)} style={{width:"100%",borderRadius:6,objectFit:"cover",maxHeight:180,display:"block",cursor:"pointer"}} onError={e=>e.target.style.display="none"}/>}
       {isAudio&&<audio src={concept.content} controls style={{width:"100%",marginTop:4}}/>}
-      {isCode&&<pre style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"#B8BDD4",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#0A0E1A",padding:10,borderRadius:6,maxHeight:160,overflow:"auto",margin:0}}>{concept.content}</pre>}
+      {isCode&&<pre style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"#B8BDD4",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"var(--bg)",padding:10,borderRadius:6,maxHeight:160,overflow:"auto",margin:0}}>{concept.content}</pre>}
       {isLink&&<a href={concept.content} target="_blank" rel="noreferrer" style={{...s.fileLink,display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>↗ {concept.content}</a>}
       {!isColor&&!isImage&&!isAudio&&!isCode&&!isLink&&<p style={{color:"#B8BDD4",fontSize:13,lineHeight:1.65,whiteSpace:"pre-wrap"}}>{concept.content}</p>}
     </div>
@@ -2143,7 +2242,7 @@ function TimeTab({project,onStart,onStop,onDelete}){
       <div style={s.tabBar}><span style={s.mono12}>Total: {fmtDuration(totalSeconds)} · Today: {fmtDuration(todaySeconds)}</span></div>
 
       {/* Timer card */}
-      <div className="q-ver-card" style={{marginBottom:20,borderLeft:`3px solid ${running?"#4ADE80":"#1E2540"}`}}>
+      <div className="q-ver-card" style={{marginBottom:20,borderLeft:`3px solid ${running?"#4ADE80":"var(--border-md)"}`}}>
         <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
           <div style={{fontFamily:"'JetBrains Mono'",fontSize:28,fontWeight:700,color:running?"#4ADE80":"#6B7290",letterSpacing:2,minWidth:90}}>
             {running?fmtDurationLong(elapsed):"00:00:00"}
@@ -2231,7 +2330,7 @@ function BuildLogTab({project,onAdd,onUpdateStatus,onDelete}){
               </div>
               <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:b.notes?10:0}}>
                 {Object.entries(BUILD_STATUSES).map(([k,v])=>(
-                  <button key={k} onClick={()=>onUpdateStatus(b.id,k)} style={{fontSize:11,padding:"3px 10px",background:b.status===k?v.color+"22":"transparent",border:`1px solid ${b.status===k?v.color:"#1E2540"}`,borderRadius:12,color:b.status===k?v.color:"#6B7290",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>
+                  <button key={k} onClick={()=>onUpdateStatus(b.id,k)} style={{fontSize:11,padding:"3px 10px",background:b.status===k?v.color+"22":"transparent",border:`1px solid ${b.status===k?v.color:"var(--border-md)"}`,borderRadius:12,color:b.status===k?v.color:"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>
                     {v.icon} {v.label}
                   </button>
                 ))}
@@ -2273,7 +2372,7 @@ function EnvironmentsTab({project,onAdd,onEdit,onDelete}){
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
                   <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:4}}>Variables ({env.variables.length})</div>
                   {env.variables.map((v,i)=>(
-                    <div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"5px 10px",background:"#0D1120",borderRadius:6}}>
+                    <div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"5px 10px",background:"var(--bg-input)",borderRadius:6}}>
                       <span style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#00D4FF",minWidth:100,flexShrink:0}}>{v.key}</span>
                       <span style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#B8BDD4",flex:1,wordBreak:"break-all"}}>
                         {v.masked&&!revealed[`${env.id}-${i}`] ? "••••••••••••" : v.value}
@@ -2354,6 +2453,21 @@ function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,t
   const [localTheme,setLocalTheme]=useState(theme||"dark");
   const [localAccent,setLocalAccent]=useState(accentColor||"#00D4FF");
   const [localStatuses,setLocalStatuses]=useState({...customStatuses});
+
+  // Live preview — inject theme CSS as user adjusts, before hitting Save
+  useEffect(()=>{
+    let el=document.getElementById("q-preview-theme");
+    if(!el){el=document.createElement("style");el.id="q-preview-theme";document.head.appendChild(el);}
+    el.textContent=buildThemeCSS(localTheme,localAccent);
+    return()=>{ /* keep preview while modal is open */ };
+  },[localTheme,localAccent]);
+
+  // On cancel — revert to saved theme
+  const handleCancel=()=>{
+    const el=document.getElementById("q-preview-theme");
+    if(el)el.textContent=buildThemeCSS(theme,accentColor);
+    onCancel();
+  };
   const TAG_PRESET_COLORS=["#00D4FF","#4ADE80","#FFB347","#FF6B9D","#B47FFF","#FF4466","#8B8FA8","#6EB8D0"];
   const ACCENT_PRESETS=["#00D4FF","#4ADE80","#FFB347","#FF6B9D","#B47FFF","#F97316","#34D399","#60A5FA"];
   const onDragStart=i=>setDragIdx(i);
@@ -2364,6 +2478,8 @@ function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,t
   const isElectron=!!window.electronAPI?.checkForUpdates;
 
   const handleSave=()=>{
+    const el=document.getElementById('q-preview-theme');
+    if(el)el.remove();
     onSavePreferences({theme:localTheme,accentColor:localAccent,customStatuses:localStatuses});
     onSave(order);
   };
@@ -2471,7 +2587,7 @@ function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,t
       <div style={{padding:"10px 14px",background:"var(--accent-dim)",borderRadius:8,border:"1px solid var(--accent-border)",marginBottom:4}}>
         <p style={{fontSize:12,color:"var(--txt-muted)",lineHeight:1.6}}>All settings sync across devices.<br/>Shortcuts: <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>Ctrl+←/→</span> tabs · <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>Ctrl+↑↓</span> projects · <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>Ctrl+Enter</span> submit · <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>F5</span> refresh</p>
       </div>
-      <FormActions onCancel={onCancel} onSubmit={handleSave} submitLabel="Save Settings"/>
+      <FormActions onCancel={handleCancel} onSubmit={handleSave} submitLabel="Save Settings"/>
     </div>
   );
 }
@@ -2506,7 +2622,7 @@ function ProjectForm({data,setData,title,userTags,templates,onSubmit,onCancel}){
       <Field label="Project Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., CarKeep"/></Field>
       <Field label="Description"><textarea className="q-input" style={{height:72,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="What does this project do?"/></Field>
       <Field label="Status"><select className="q-input" value={data.status||"planning"} onChange={e=>set("status",e.target.value)}>{Object.entries(STATUS_CONFIG).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></Field>
-      {userTags?.length>0&&<Field label="Tags"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{userTags.map(t=>{const on=(data.tagIds||[]).includes(t.id);return<button key={t.id} onClick={()=>togTag(t.id)} style={{fontSize:12,padding:"4px 11px",borderRadius:12,background:on?`${t.color}20`:"#111627",border:`1px solid ${on?t.color:"#1E2540"}`,color:on?t.color:"#6B7290",cursor:"pointer",fontFamily:"'Syne'",fontWeight:600,transition:"all .15s"}}>{t.name}</button>;})} </div></Field>}
+      {userTags?.length>0&&<Field label="Tags"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{userTags.map(t=>{const on=(data.tagIds||[]).includes(t.id);return<button key={t.id} onClick={()=>togTag(t.id)} style={{fontSize:12,padding:"4px 11px",borderRadius:12,background:on?`${t.color}20`:"var(--bg-card)",border:`1px solid ${on?t.color:"var(--border-md)"}`,color:on?t.color:"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",fontWeight:600,transition:"all .15s"}}>{t.name}</button>;})} </div></Field>}
       <Field label="Git Repository URL"><input className="q-input" value={data.gitUrl||""} onChange={e=>set("gitUrl",e.target.value)} placeholder="https://github.com/…"/></Field>
       <Field label="Supabase Project URL"><input className="q-input" value={data.supabaseUrl||""} onChange={e=>set("supabaseUrl",e.target.value)} placeholder="https://supabase.com/dashboard/project/…"/></Field>
       <Field label="Vercel Project URL"><input className="q-input" value={data.vercelUrl||""} onChange={e=>set("vercelUrl",e.target.value)} placeholder="https://vercel.com/…"/></Field>
@@ -2565,7 +2681,7 @@ function ConceptForm({data,setData,cfg,session,projectId,onSubmit,onUploadFile,o
   const startRec=async()=>{try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});const chunks=[];const mr=new MediaRecorder(stream);mr.ondataavailable=e=>chunks.push(e.data);mr.onstop=()=>{const blob=new Blob(chunks,{type:"audio/webm"});const reader=new FileReader();reader.onload=()=>set("content",reader.result);reader.readAsDataURL(blob);stream.getTracks().forEach(t=>t.stop());};mr.start();mrRef.current=mr;setRecording(true);}catch{alert("Mic access denied");}};
   const stopRec=()=>{mrRef.current?.stop();setRecording(false);};
   const renderInput=()=>{switch(data.type){
-    case "color":return<div style={{display:"flex",gap:10,alignItems:"center",marginTop:8}}><input type="color" value={data.content||"#00D4FF"} onChange={e=>set("content",e.target.value)} style={{width:48,height:40,padding:2,background:"#0D1120",border:"1px solid #1E2540",borderRadius:6,cursor:"pointer"}}/><input className="q-input" style={{flex:1,marginTop:0,fontFamily:"'JetBrains Mono'"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="#hex, rgb(), hsl()"/></div>;
+    case "color":return<div style={{display:"flex",gap:10,alignItems:"center",marginTop:8}}><input type="color" value={data.content||"#00D4FF"} onChange={e=>set("content",e.target.value)} style={{width:48,height:40,padding:2,background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:6,cursor:"pointer"}}/><input className="q-input" style={{flex:1,marginTop:0,fontFamily:"'JetBrains Mono'"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="#hex, rgb(), hsl()"/></div>;
     case "image":return<div><input className="q-input" value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="https://image-url.com/..."/><button className="q-btn-ghost" style={{marginTop:8,width:"100%"}} onClick={()=>fileRef.current?.click()}>Upload Image</button><input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFileChange}/></div>;
     case "audio":return<div style={{marginTop:8}}>{recording?<button className="q-btn-danger" style={{width:"100%",padding:10}} onClick={stopRec}>Stop Recording</button>:<button className="q-btn-ghost" style={{width:"100%",padding:10}} onClick={startRec}>Start Recording</button>}<button className="q-btn-ghost" style={{marginTop:8,width:"100%"}} onClick={()=>fileRef.current?.click()}>Upload Audio</button><input ref={fileRef} type="file" accept="audio/*" style={{display:"none"}} onChange={handleFileChange}/>{data.content&&<audio src={data.content} controls style={{width:"100%",marginTop:10}}/>}</div>;
     case "code": return<textarea className="q-input q-mono" style={{height:130,resize:"vertical"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="// paste code here"/>;
@@ -2618,7 +2734,7 @@ function EnvironmentForm({data,setData,title,onSubmit,onCancel}){
       <Field label="URL"><input className="q-input" value={data.url||""} onChange={e=>set("url",e.target.value)} placeholder="https://…"/></Field>
       <Field label="Color">
         <div style={{display:"flex",gap:8,marginTop:8,alignItems:"center"}}>
-          <input type="color" value={data.color||"#4ADE80"} onChange={e=>set("color",e.target.value)} style={{width:40,height:36,padding:2,background:"#0D1120",border:"1px solid #1E2540",borderRadius:6,cursor:"pointer"}}/>
+          <input type="color" value={data.color||"#4ADE80"} onChange={e=>set("color",e.target.value)} style={{width:40,height:36,padding:2,background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:6,cursor:"pointer"}}/>
           {ENV_PRESET_COLORS.map(c=><button key={c} onClick={()=>set("color",c)} style={{width:22,height:22,borderRadius:"50%",background:c,border:data.color===c?"2px solid #fff":"2px solid transparent",cursor:"pointer"}}/>)}
         </div>
       </Field>
@@ -2701,7 +2817,7 @@ function GitHubTab({project,data,onRefresh,onLoadCache}){
             <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Recent Commits ({data.commits.length})</div>
             <div style={{display:"flex",flexDirection:"column",gap:4}}>
               {data.commits.map(c=>(
-                <div key={c.sha} style={{display:"flex",gap:10,padding:"9px 12px",background:"#111627",border:"1px solid #1A2040",borderRadius:8,alignItems:"flex-start"}}>
+                <div key={c.sha} style={{display:"flex",gap:10,padding:"9px 12px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:8,alignItems:"flex-start"}}>
                   <a href={c.url} target="_blank" rel="noreferrer" style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"#00D4FF",flexShrink:0,marginTop:2,minWidth:50}}>{c.sha}</a>
                   <div style={{flex:1,minWidth:0}}>
                     <p style={{color:"#C0C6E0",fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.message}</p>
@@ -2719,7 +2835,7 @@ function GitHubTab({project,data,onRefresh,onLoadCache}){
             <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#FF6B9D",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Open Issues ({data.issues.length})</div>
             <div style={{display:"flex",flexDirection:"column",gap:4}}>
               {data.issues.map(i=>(
-                <div key={i.id} style={{display:"flex",gap:10,padding:"9px 12px",background:"#111627",border:"1px solid #1A2040",borderRadius:8,alignItems:"center"}}>
+                <div key={i.id} style={{display:"flex",gap:10,padding:"9px 12px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:8,alignItems:"center"}}>
                   <span style={{...s.mono10,color:"#4B5268",flexShrink:0}}>#{i.id}</span>
                   <a href={i.url} target="_blank" rel="noreferrer" style={{color:"#C0C6E0",fontSize:13,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:"none"}}>{i.title}</a>
                   <div style={{display:"flex",gap:4,flexShrink:0}}>{i.labels?.slice(0,2).map(l=><span key={l} style={{fontSize:10,padding:"2px 6px",borderRadius:8,background:"rgba(0,212,255,.08)",color:"#6EB8D0",fontFamily:"'JetBrains Mono'"}}>{l}</span>)}</div>
@@ -2735,7 +2851,7 @@ function GitHubTab({project,data,onRefresh,onLoadCache}){
             <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4ADE80",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Open Pull Requests ({data.prs.length})</div>
             <div style={{display:"flex",flexDirection:"column",gap:4}}>
               {data.prs.map(pr=>(
-                <div key={pr.id} style={{display:"flex",gap:10,padding:"9px 12px",background:"#111627",border:"1px solid #1A2040",borderRadius:8,alignItems:"center"}}>
+                <div key={pr.id} style={{display:"flex",gap:10,padding:"9px 12px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:8,alignItems:"center"}}>
                   <span style={{...s.mono10,color:"#4B5268",flexShrink:0}}>#{pr.id}</span>
                   {pr.draft&&<span style={{fontSize:10,padding:"2px 6px",borderRadius:6,background:"rgba(139,143,168,.12)",color:"#8B8FA8",flexShrink:0}}>Draft</span>}
                   <a href={pr.url} target="_blank" rel="noreferrer" style={{color:"#C0C6E0",fontSize:13,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:"none"}}>{pr.title}</a>
@@ -2777,7 +2893,7 @@ function ManageTemplatesModal({templates,onDelete,onApply,onCancel}){
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
           {templates.map(t=>(
-            <div key={t.id} style={{display:"flex",gap:12,padding:"13px 16px",background:"#0D1120",border:"1px solid #1E2540",borderRadius:10,alignItems:"center"}}>
+            <div key={t.id} style={{display:"flex",gap:12,padding:"13px 16px",background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:10,alignItems:"center"}}>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{color:"#E8EAF6",fontWeight:600,fontSize:14}}>{t.name}</div>
                 {t.description&&<div style={{color:"#8B8FA8",fontSize:12,marginTop:2}}>{t.description}</div>}
@@ -2835,7 +2951,7 @@ function ChangelogModal({project,onClose,onPublishRelease}){
       </div>
 
       {/* Generated changelog */}
-      <div style={{background:"#0A0E1A",border:"1px solid #1A2040",borderRadius:10,padding:18,maxHeight:"40vh",overflowY:"auto",marginBottom:16}}>
+      <div style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:18,maxHeight:"40vh",overflowY:"auto",marginBottom:16}}>
         <pre style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#B8BDD4",whiteSpace:"pre-wrap",lineHeight:1.7,margin:0}}>{md}</pre>
       </div>
 
@@ -2918,8 +3034,8 @@ function ConfirmDialog({msg,onYes,onNo}){
   useEffect(()=>{const h=e=>{if(e.key==="Enter")onYes();if(e.key==="Escape")onNo();};window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h);},[]);
   return(
     <>
-      <div style={{position:"fixed",inset:0,background:"rgba(4,6,14,.88)",zIndex:1100}}/>
-      <div style={{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1101,background:"#111627",border:"1px solid #1E2540",borderRadius:14,padding:"28px 32px",maxWidth:380,width:"90%",boxShadow:"0 16px 48px rgba(0,0,0,.6)"}}>
+      <div style={{position:"fixed",inset:0,background:"var(--overlay)",zIndex:1100}}/>
+      <div style={{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1101,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:14,padding:"28px 32px",maxWidth:380,width:"90%",boxShadow:"0 16px 48px rgba(0,0,0,.6)"}}>
         <p style={{fontFamily:"'Syne'",fontSize:15,fontWeight:600,color:"#E8EAF6",lineHeight:1.5,marginBottom:24}}>{msg}</p>
         <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
           <button className="q-btn-ghost" onClick={onNo} autoFocus>Cancel</button>
@@ -2929,8 +3045,8 @@ function ConfirmDialog({msg,onYes,onNo}){
     </>
   );
 }
-function Toast({msg,type}){const c={ok:{bg:"#0F2A1A",border:"#4ADE80",text:"#4ADE80",icon:"✓"},err:{bg:"#2A0F18",border:"#FF4466",text:"#FF7090",icon:"✕"},info:{bg:"#0F1A2A",border:"#00D4FF",text:"#00D4FF",icon:"ℹ"}}[type]||{bg:"#0F2A1A",border:"#4ADE80",text:"#4ADE80",icon:"✓"};return<div style={{position:"fixed",bottom:24,right:24,zIndex:9999,background:c.bg,border:`1px solid ${c.border}`,color:c.text,padding:"10px 18px",borderRadius:9,fontSize:13,maxWidth:320,fontFamily:"'Syne'",fontWeight:600,boxShadow:"0 4px 24px rgba(0,0,0,.5)",lineHeight:1.5}}>{c.icon} {msg}</div>;}
-function Splash({msg}){return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0A0E1A",color:"#00D4FF",fontFamily:"'JetBrains Mono'",fontSize:13}}>{msg}</div>;}
+function Toast({msg,type}){const c={ok:{bg:"var(--toast-ok-bg)",border:"#4ADE80",text:"#4ADE80",icon:"✓"},err:{bg:"var(--toast-err-bg)",border:"#FF4466",text:"#FF7090",icon:"✕"},info:{bg:"var(--toast-info-bg)",border:"var(--accent)",text:"var(--accent)",icon:"ℹ"}}[type]||{bg:"var(--toast-ok-bg)",border:"#4ADE80",text:"#4ADE80",icon:"✓"};return<div style={{position:"fixed",bottom:24,right:24,zIndex:9999,background:c.bg,border:`1px solid ${c.border}`,color:c.text,padding:"10px 18px",borderRadius:9,fontSize:13,maxWidth:320,fontFamily:"'Syne'",fontWeight:600,boxShadow:"0 4px 24px rgba(0,0,0,.3)",lineHeight:1.5}}>{c.icon} {msg}</div>;}
+function Splash({msg}){return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--bg)",color:"var(--accent)",fontFamily:"'JetBrains Mono'",fontSize:13}}>{msg}</div>;}
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 const css=`
@@ -2938,7 +3054,7 @@ const css=`
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
   /* Force text selection on entire doc for Android IME, then restrict non-inputs */
   html,body,#root{-webkit-user-select:none;user-select:none;}
-  ::-webkit-scrollbar{width:4px;height:4px;}::-webkit-scrollbar-track{background:#0A0E1A;}::-webkit-scrollbar-thumb{background:#1E2540;border-radius:2px;}
+  ::-webkit-scrollbar{width:4px;height:4px;}::-webkit-scrollbar-track{background:var(--bg,#0A0E1A);}::-webkit-scrollbar-thumb{background:var(--scrollbar,#1E2540);border-radius:2px;}
   input,textarea,select{outline:none;-webkit-user-select:text!important;user-select:text!important;-webkit-touch-callout:default!important;touch-action:manipulation;}
   button{cursor:pointer;border:none;background:none;font-family:'Syne',sans-serif;}a{text-decoration:none;}
   audio{accent-color:#00D4FF;}
@@ -3021,7 +3137,7 @@ const s={
   infoCard:{background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,padding:"15px 17px"},
   infoLbl:{fontSize:11,color:"var(--txt-muted)",fontWeight:700,letterSpacing:".8px",textTransform:"uppercase"},
   fileLink:{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--accent)",background:"var(--accent-dim)",border:"1px solid var(--accent-border)",borderRadius:4,padding:"4px 8px",display:"inline-block"},
-  overlayBackdrop:{position:"fixed",inset:0,background:"rgba(4,6,14,.88)",zIndex:1000},
+  overlayBackdrop:{position:"fixed",inset:0,background:"var(--overlay)",zIndex:1000},
   modalCentered:{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1001,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:14,padding:26,width:"90%",maxWidth:560,maxHeight:"90vh",overflowY:"auto"},
   modalTitle:{fontFamily:"'Syne'",fontSize:20,fontWeight:700,marginBottom:18,color:"var(--txt)"},
   fieldLbl:{display:"block",fontSize:11,fontWeight:700,color:"var(--txt-muted)",letterSpacing:".7px",textTransform:"uppercase",marginBottom:0},
