@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openHTMLInBrowser:  (html) => ipcRenderer.invoke('open-html-in-browser', html),
   checkForUpdates:    ()     => ipcRenderer.invoke('check-for-updates'),
   installUpdate:      ()     => ipcRenderer.invoke('install-update'),
+  setTitlebarOverlay: (opts) => ipcRenderer.invoke('set-titlebar-overlay', opts),
   onNewProject:       (cb)   => { ipcRenderer.on('new-project', cb); return ()=>ipcRenderer.removeListener('new-project',cb); },
   onUpdateAvailable:  (cb)   => { ipcRenderer.on('update-available',  cb); return ()=>ipcRenderer.removeListener('update-available',cb);  },
   onUpdateProgress:   (cb)   => { ipcRenderer.on('update-progress',   cb); return ()=>ipcRenderer.removeListener('update-progress',cb);   },

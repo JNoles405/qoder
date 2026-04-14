@@ -51,6 +51,12 @@ ipcMain.handle('install-update', () => {
   if (autoUpdater) autoUpdater.quitAndInstall();
 });
 
+ipcMain.handle('set-titlebar-overlay', (event, opts) => {
+  if (mainWindow && process.platform === 'win32') {
+    try { mainWindow.setTitleBarOverlay(opts); } catch {}
+  }
+});
+
 // ── Window ────────────────────────────────────────────────────────────────────
 let mainWindow;
 

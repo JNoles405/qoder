@@ -54,16 +54,16 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.6.0";
+const APP_VER    = "v0.6.1";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
 const STATUS_CONFIG = {
-  planning: {label:"Planning",       color:"#8B8FA8",bg:"rgba(139,143,168,0.12)"},
+  planning: {label:"Planning",       color:"var(--txt-muted)",bg:"rgba(139,143,168,0.12)"},
   "in-dev": {label:"In Development", color:"#00D4FF",bg:"rgba(0,212,255,0.10)" },
   beta:     {label:"Beta",           color:"#FFB347",bg:"rgba(255,179,71,0.10)" },
   released: {label:"Released",       color:"#4ADE80",bg:"rgba(74,222,128,0.10)"},
-  archived: {label:"Archived",       color:"#4B5268",bg:"rgba(75,82,104,0.10)" },
+  archived: {label:"Archived",       color:"var(--txt-faint)",bg:"rgba(75,82,104,0.10)" },
 };
 const TECH_TAGS=[
   "React","React Native","Capacitor","Electron","Node.js","Supabase","Firebase",
@@ -79,7 +79,7 @@ const PRIORITY_CONFIG = {
   critical: { label:"Critical", color:"#FF4466", bg:"rgba(255,68,102,0.12)",  icon:"🔴" },
   high:     { label:"High",     color:"#FFB347", bg:"rgba(255,179,71,0.12)",  icon:"🟠" },
   medium:   { label:"Medium",   color:"#00D4FF", bg:"rgba(0,212,255,0.10)",   icon:"🔵" },
-  low:      { label:"Low",      color:"#8B8FA8", bg:"rgba(139,143,168,0.10)", icon:"⚪" },
+  low:      { label:"Low",      color:"var(--txt-muted)", bg:"rgba(139,143,168,0.10)", icon:"⚪" },
 };
 const PRIORITY_KEYS = ["critical","high","medium","low"];
 
@@ -93,7 +93,7 @@ const DEP_STATUSES = {
 
 const BUILD_PLATFORMS = ["android","ios","windows","web","macos","linux"];
 const BUILD_STATUSES  = {
-  building:  { label:"Building",   color:"#8B8FA8", icon:"⟳" },
+  building:  { label:"Building",   color:"var(--txt-muted)", icon:"⟳" },
   signed:    { label:"Signed",     color:"#00D4FF", icon:"✍" },
   submitted: { label:"Submitted",  color:"#FFB347", icon:"↑" },
   rejected:  { label:"Rejected",   color:"#FF4466", icon:"✕" },
@@ -113,11 +113,11 @@ const THEMES = {
     txtFaint: "#4B5268", txtDim:   "#2E3558", txtGhost: "#2A304A",
   },
   light: {
-    bg:       "#ECEEF5", bgSide:   "#E2E5F0", bgCard:   "#F5F6FC",
-    bgInput:  "#ECEEF8", bgModal:  "#F5F6FC",
-    border:   "#BDC5DC", borderMd: "#B0BAD4", borderLg: "#C8D0E8",
-    txt:      "#0F1729", txtSub:   "#374160", txtMuted: "#536080",
-    txtFaint: "#7080A0", txtDim:   "#9AA5BE", txtGhost: "#B0BAD0",
+    bg:       "#D4D8E4", bgSide:   "#C8CCDA", bgCard:   "#DCE0EC",
+    bgInput:  "#CDD1DE", bgModal:  "#DCE0EC",
+    border:   "#9AA4BC", borderMd: "#8E98B4", borderLg: "#A8B2C8",
+    txt:      "#080E1C", txtSub:   "#1E2C48", txtMuted: "#3A4A68",
+    txtFaint: "#506080", txtDim:   "#6878A0", txtGhost: "#8898B8",
   },
 };
 
@@ -178,7 +178,7 @@ const FEED_META={
   note:         {icon:"⬝",label:"Note",           color:"#FFB347"},
   "issue-fixed":{icon:"🐛",label:"Issue Fixed",   color:"#B47FFF"},
   sprint:       {icon:"◈",label:"Sprint Done",    color:"#B47FFF"},
-  time:         {icon:"⏱",label:"Time Logged",    color:"#6B7290"},
+  time:         {icon:"⏱",label:"Time Logged",    color:"var(--txt-muted)"},
 };
 const TIME_PERIODS=[
   {key:"24h",label:"24h",ms:86400000},
@@ -450,25 +450,25 @@ function renderMarkdown(text){
       const lang=l.slice(3).trim();
       const block=[];i++;
       while(i<lines.length&&!lines[i].startsWith("```")){block.push(lines[i]);i++;}
-      out.push(<pre key={i} style={{fontFamily:"'JetBrains Mono'",fontSize:12,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"12px 14px",overflowX:"auto",margin:"10px 0",color:"#B8BDD4",lineHeight:1.7}}><code>{block.join("\n")}</code></pre>);
+      out.push(<pre key={i} style={{fontFamily:"'JetBrains Mono'",fontSize:12,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"12px 14px",overflowX:"auto",margin:"10px 0",color:"var(--txt-sub)",lineHeight:1.7}}><code>{block.join("\n")}</code></pre>);
       i++;continue;
     }
     // HR
     if(/^---+$/.test(l.trim())){out.push(<hr key={i} style={{border:"none",borderTop:"1px solid var(--border)",margin:"16px 0"}}/>);i++;continue;}
     // Headings
     const hm=l.match(/^(#{1,3})\s+(.+)/);
-    if(hm){const sz=[20,17,15][hm[1].length-1];out.push(<div key={i} style={{fontFamily:"'Syne'",fontWeight:700,fontSize:sz,color:"#E8EAF6",margin:`${hm[1].length===1?"18px":"12px"} 0 6px`}}>{inlinesMd(hm[2])}</div>);i++;continue;}
+    if(hm){const sz=[20,17,15][hm[1].length-1];out.push(<div key={i} style={{fontFamily:"'Syne'",fontWeight:700,fontSize:sz,color:"var(--txt)",margin:`${hm[1].length===1?"18px":"12px"} 0 6px`}}>{inlinesMd(hm[2])}</div>);i++;continue;}
     // Blockquote
     if(l.startsWith("> ")){out.push(<div key={i} style={{borderLeft:"3px solid var(--border-md)",paddingLeft:12,margin:"4px 0",color:"var(--txt-sub)",fontSize:13,lineHeight:1.6}}>{inlinesMd(l.slice(2))}</div>);i++;continue;}
     // Unordered list
-    if(/^[-*]\s/.test(l)){out.push(<div key={i} style={{display:"flex",gap:8,margin:"2px 0"}}><span style={{color:"#6B7290",flexShrink:0,marginTop:2}}>•</span><span style={{color:"#B8BDD4",fontSize:14,lineHeight:1.6}}>{inlinesMd(l.slice(2))}</span></div>);i++;continue;}
+    if(/^[-*]\s/.test(l)){out.push(<div key={i} style={{display:"flex",gap:8,margin:"2px 0"}}><span style={{color:"var(--txt-muted)",flexShrink:0,marginTop:2}}>•</span><span style={{color:"var(--txt-sub)",fontSize:14,lineHeight:1.6}}>{inlinesMd(l.slice(2))}</span></div>);i++;continue;}
     // Numbered list
     const nm=l.match(/^(\d+)\.\s+(.+)/);
-    if(nm){out.push(<div key={i} style={{display:"flex",gap:8,margin:"2px 0"}}><span style={{color:"#6B7290",flexShrink:0,fontFamily:"'JetBrains Mono'",fontSize:12,marginTop:2}}>{nm[1]}.</span><span style={{color:"#B8BDD4",fontSize:14,lineHeight:1.6}}>{inlinesMd(nm[2])}</span></div>);i++;continue;}
+    if(nm){out.push(<div key={i} style={{display:"flex",gap:8,margin:"2px 0"}}><span style={{color:"var(--txt-muted)",flexShrink:0,fontFamily:"'JetBrains Mono'",fontSize:12,marginTop:2}}>{nm[1]}.</span><span style={{color:"var(--txt-sub)",fontSize:14,lineHeight:1.6}}>{inlinesMd(nm[2])}</span></div>);i++;continue;}
     // Empty line → spacer
     if(!l.trim()){out.push(<div key={i} style={{height:8}}/>);i++;continue;}
     // Normal paragraph
-    out.push(<p key={i} style={{color:"#B8BDD4",fontSize:14,lineHeight:1.75,margin:"2px 0"}}>{inlinesMd(l)}</p>);
+    out.push(<p key={i} style={{color:"var(--txt-sub)",fontSize:14,lineHeight:1.75,margin:"2px 0"}}>{inlinesMd(l)}</p>);
     i++;
   }
   return<>{out}</>;
@@ -492,9 +492,9 @@ function inlinesMd(text){
     const earliest=candidates.reduce((a,b)=>b.m.index<a.m.index?b:a);
     const {m,type}=earliest;
     if(m.index>0)parts.push(<span key={key++}>{remaining.slice(0,m.index)}</span>);
-    if(type==="b")parts.push(<strong key={key++} style={{color:"#E8EAF6"}}>{m[1]}</strong>);
-    else if(type==="i")parts.push(<em key={key++} style={{color:"#C0C6E0",fontStyle:"italic"}}>{m[1]}</em>);
-    else if(type==="c")parts.push(<code key={key++} style={{fontFamily:"'JetBrains Mono'",fontSize:12,background:"rgba(0,212,255,.08)",color:"#00D4FF",padding:"1px 5px",borderRadius:4}}>{m[1]}</code>);
+    if(type==="b")parts.push(<strong key={key++} style={{color:"var(--txt)"}}>{m[1]}</strong>);
+    else if(type==="i")parts.push(<em key={key++} style={{color:"var(--txt-sub)",fontStyle:"italic"}}>{m[1]}</em>);
+    else if(type==="c")parts.push(<code key={key++} style={{fontFamily:"'JetBrains Mono'",fontSize:12,background:"var(--accent-dim)",color:"var(--accent)",padding:"1px 5px",borderRadius:4}}>{m[1]}</code>);
     else if(type==="l")parts.push(<a key={key++} href={m[2]} target="_blank" rel="noreferrer" style={{color:"#00D4FF",textDecoration:"underline"}}>{m[1]}</a>);
     remaining=remaining.slice(m.index+m[0].length);
   }
@@ -663,8 +663,30 @@ export default function QoderApp() {
   },[cfg,session]);
   usePullToRefresh(isMobile?doRefresh:async()=>{});
 
-  const saveTheme=(t)=>{setTheme(t);try{localStorage.setItem("q-theme",t);}catch{}};
-  const saveAccent=(c)=>{setAccentColor(c);try{localStorage.setItem("q-accent",c);}catch{}};
+  const saveTheme=(t)=>{
+    setTheme(t);
+    try{localStorage.setItem("q-theme",t);}catch{}
+    syncTitlebar(t,accentColor);
+  };
+  const saveAccent=(c)=>{
+    setAccentColor(c);
+    try{localStorage.setItem("q-accent",c);}catch{}
+    syncTitlebar(theme,c);
+  };
+
+  // Sync Windows titlebar overlay colors with current theme
+  function syncTitlebar(themeName, accent){
+    if(!window.electronAPI?.setTitlebarOverlay)return;
+    const isLight=themeName==="light";
+    window.electronAPI.setTitlebarOverlay({
+      color:      isLight?"#C8CCDA":"#0c1020",
+      symbolColor:isLight?"#1E2C48":"#8B8FA8",
+      height: 32,
+    });
+  }
+
+  // Sync titlebar on first render
+  useEffect(()=>{ syncTitlebar(theme,accentColor); },[]);
   const applyCustomStatus=(key,label)=>setCustomStatuses(prev=>({...prev,[key]:label}));
   const resetCustomStatus=(key)=>setCustomStatuses(prev=>{const n={...prev};delete n[key];return n;});
 
@@ -770,6 +792,7 @@ export default function QoderApp() {
     if(prefs.theme!==undefined){saveTheme(prefs.theme);}
     if(prefs.accentColor!==undefined){saveAccent(prefs.accentColor);}
     if(prefs.customStatuses!==undefined){setCustomStatuses(prefs.customStatuses);}
+    syncTitlebar(prefs.theme??theme, prefs.accentColor??accentColor);
     if(!session||!cfg)return;
     try{
       await sb.upsertSettings(cfg.url,cfg.key,session.access_token,session.user.id,{
@@ -1327,7 +1350,7 @@ export default function QoderApp() {
       {!isMobile&&sidebarCollapsed&&(
         <div style={{width:36,flexShrink:0,background:"var(--bg-side)",borderRight:"1px solid var(--border-lg)",display:"flex",flexDirection:"column",alignItems:"center",paddingTop:16,gap:12,position:"sticky",top:0,height:"100vh",zIndex:1}}>
           <div style={{fontFamily:"'Syne'",fontSize:16,fontWeight:800,color:"#00D4FF",lineHeight:1}}>Q</div>
-          <button onClick={toggleSidebarCollapse} title="Expand sidebar" style={{color:"#6B7290",fontSize:18,background:"none",border:"none",cursor:"pointer",marginTop:4}}>›</button>
+          <button onClick={toggleSidebarCollapse} title="Expand sidebar" style={{color:"var(--txt-muted)",fontSize:18,background:"none",border:"none",cursor:"pointer",marginTop:4}}>›</button>
         </div>
       )}
 
@@ -1347,7 +1370,7 @@ export default function QoderApp() {
             <span style={s.logoBeta}>{APP_VER}</span>
             {isMobile
               ? <button style={s.closeSidebar} onClick={()=>setSidebarOpen(false)}>✕</button>
-              : <button onClick={toggleSidebarCollapse} title="Collapse sidebar" style={{marginLeft:"auto",color:"#4B5268",fontSize:16,padding:"0 4px",background:"none",border:"none",cursor:"pointer",lineHeight:1}}>‹</button>
+              : <button onClick={toggleSidebarCollapse} title="Collapse sidebar" style={{marginLeft:"auto",color:"var(--txt-faint)",fontSize:16,padding:"0 4px",background:"none",border:"none",cursor:"pointer",lineHeight:1}}>‹</button>
             }
           </div>
           <nav style={s.nav}>
@@ -1380,7 +1403,7 @@ export default function QoderApp() {
 
       {/* Main */}
       <main style={s.main}>
-        {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"#E8EAF6"}}>oder</span></div><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div>}
+        {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"var(--txt)"}}>oder</span></div><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div>}
 
         {view==="dashboard"&&<Dashboard projects={filtered} allProjects={projects} isMobile={isMobile} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} userTags={userTags} tagFilter={tagFilter} setTagFilter={setTagFilter} onOpen={openProject} onNew={()=>openModal("add-project",{status:"planning",techStack:[],tagIds:[]})}/>}
         {view==="project"&&liveProj&&(
@@ -1503,10 +1526,10 @@ function Lightbox({url,name,onClose}){
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:9000,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
       <div style={{display:"flex",gap:12,marginBottom:16}} onClick={e=>e.stopPropagation()}>
         <button onClick={download} style={{padding:"8px 18px",background:"#00D4FF",color:"#06090F",border:"none",borderRadius:8,fontFamily:"'Syne'",fontWeight:700,fontSize:13,cursor:"pointer"}}>Download</button>
-        <button onClick={onClose} style={{padding:"8px 14px",background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.15)",borderRadius:8,color:"#E8EAF6",fontFamily:"'Syne'",fontSize:13,cursor:"pointer"}}>✕ Close</button>
+        <button onClick={onClose} style={{padding:"8px 14px",background:"rgba(255,255,255,.08)",border:"1px solid rgba(255,255,255,.15)",borderRadius:8,color:"var(--txt)",fontFamily:"'Syne'",fontSize:13,cursor:"pointer"}}>✕ Close</button>
       </div>
       <img src={url} alt={name} onClick={e=>e.stopPropagation()} style={{maxWidth:"92vw",maxHeight:"80vh",objectFit:"contain",borderRadius:10,boxShadow:"0 16px 64px rgba(0,0,0,.8)"}}/>
-      {name&&<div style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"#6B7290",marginTop:12}}>{name}</div>}
+      {name&&<div style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-muted)",marginTop:12}}>{name}</div>}
     </div>
   );
 }
@@ -1515,7 +1538,7 @@ function Lightbox({url,name,onClose}){
 function SetupScreen({onSubmit}){
   const [url,setUrl]=useState("");const[key,setKey]=useState("");
   return(<div style={s.authWrap}><style>{css}</style><div style={s.authBox}>
-    <div style={{textAlign:"center",marginBottom:28}}><div style={{fontFamily:"'Syne'",fontSize:48,fontWeight:800,color:"#00D4FF",lineHeight:1,marginBottom:4}}>Q</div><div style={{fontFamily:"'Syne'",fontSize:20,fontWeight:800,color:"#E8EAF6"}}>Connect Supabase</div></div>
+    <div style={{textAlign:"center",marginBottom:28}}><div style={{fontFamily:"'Syne'",fontSize:48,fontWeight:800,color:"#00D4FF",lineHeight:1,marginBottom:4}}>Q</div><div style={{fontFamily:"'Syne'",fontSize:20,fontWeight:800,color:"var(--txt)"}}>Connect Supabase</div></div>
     <Field label="Project URL"><input className="q-input" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://xxxx.supabase.co"/></Field>
     <Field label="Anon / Public Key"><input className="q-input" value={key} onChange={e=>setKey(e.target.value)} placeholder="eyJhbGciOiJ…" style={{fontFamily:"'JetBrains Mono'",fontSize:12}}/></Field>
     <button className="q-btn-primary" style={{width:"100%",marginTop:8}} onClick={()=>url.trim()&&key.trim()&&onSubmit(url.trim(),key.trim())}>Connect →</button>
@@ -1524,11 +1547,11 @@ function SetupScreen({onSubmit}){
 function AuthScreen({onAuth,busy,onReset}){
   const [isSignUp,setIsSignUp]=useState(false);const[email,setEmail]=useState("");const[pw,setPw]=useState("");const[showPw,setShowPw]=useState(false);
   return(<div style={s.authWrap}><style>{css}</style><div style={s.authBox}>
-    <div style={{textAlign:"center",marginBottom:28}}><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:2,marginBottom:6}}><span style={{fontFamily:"'Syne'",fontSize:40,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:30,fontWeight:700,color:"#E8EAF6",letterSpacing:"-.5px"}}>oder</span></div><p style={{color:"#6B7290",fontSize:13}}>{isSignUp?"Create your account":"Sign in to your workspace"}</p></div>
+    <div style={{textAlign:"center",marginBottom:28}}><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:2,marginBottom:6}}><span style={{fontFamily:"'Syne'",fontSize:40,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:30,fontWeight:700,color:"var(--txt)",letterSpacing:"-.5px"}}>oder</span></div><p style={{color:"var(--txt-muted)",fontSize:13}}>{isSignUp?"Create your account":"Sign in to your workspace"}</p></div>
     <Field label="Email"><input className="q-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" onKeyDown={e=>e.key==="Enter"&&onAuth(email,pw,isSignUp)}/></Field>
-    <Field label="Password"><div style={{position:"relative"}}><input className="q-input" type={showPw?"text":"password"} value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" style={{paddingRight:44}} onKeyDown={e=>e.key==="Enter"&&onAuth(email,pw,isSignUp)}/><button onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"#6B7290",fontSize:12,background:"none",border:"none",cursor:"pointer"}}>{showPw?"hide":"show"}</button></div></Field>
+    <Field label="Password"><div style={{position:"relative"}}><input className="q-input" type={showPw?"text":"password"} value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" style={{paddingRight:44}} onKeyDown={e=>e.key==="Enter"&&onAuth(email,pw,isSignUp)}/><button onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"var(--txt-muted)",fontSize:12,background:"none",border:"none",cursor:"pointer"}}>{showPw?"hide":"show"}</button></div></Field>
     <button className="q-btn-primary" style={{width:"100%",marginTop:8,opacity:busy?.6:1}} disabled={busy} onClick={()=>onAuth(email,pw,isSignUp)}>{busy?"…":isSignUp?"Create Account":"Sign In →"}</button>
-    <div style={{display:"flex",justifyContent:"space-between",marginTop:16,fontSize:13}}><button onClick={()=>setIsSignUp(v=>!v)} style={{color:"#00D4FF",background:"none",border:"none",cursor:"pointer"}}>{isSignUp?"Already have an account?":"Create an account"}</button><button onClick={onReset} style={{color:"#4B5268",background:"none",border:"none",cursor:"pointer",fontSize:12}}>Change project</button></div>
+    <div style={{display:"flex",justifyContent:"space-between",marginTop:16,fontSize:13}}><button onClick={()=>setIsSignUp(v=>!v)} style={{color:"#00D4FF",background:"none",border:"none",cursor:"pointer"}}>{isSignUp?"Already have an account?":"Create an account"}</button><button onClick={onReset} style={{color:"var(--txt-faint)",background:"none",border:"none",cursor:"pointer",fontSize:12}}>Change project</button></div>
   </div></div>);
 }
 
@@ -1541,7 +1564,7 @@ function NavBtn({active,onClick,icon,label,small,folder,projectColor}){
   return(
     <div className={`q-nav${active?" q-nav-active":""}`} onClick={onClick} style={{fontSize:small?14:13,paddingLeft:small?22:14,display:"flex",alignItems:"center"}}>
       <span style={{fontSize:small?9:13,marginRight:7,display:"flex",alignItems:"center",flexShrink:0}}>{dot}</span>
-      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,color:active?"var(--accent)":small?"#C8CBDF":"inherit",fontWeight:small?600:500}}>{label}</span>
+      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,color:active?"var(--accent)":small?"var(--txt-sub)":"inherit",fontWeight:small?600:500}}>{label}</span>
       {hasFolder&&<button className="q-folder-btn" onClick={e=>{e.stopPropagation();window.electronAPI.openFolder(folder);}} title={folder}><FolderIcon size={13}/></button>}
     </div>
   );
@@ -1603,7 +1626,7 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
       {/* Cross-project content search results */}
       {showContentResults&&(
         <div style={{marginBottom:20}}>
-          <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>
+          <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>
             Content matches ({contentResults.length})
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:5}}>
@@ -1613,13 +1636,13 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}>
                     <span style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:meta.color,fontWeight:700}}>{r.label.toUpperCase()}</span>
-                    <span style={{fontSize:12,color:"#6B7290",fontFamily:"'Syne'",fontWeight:600}}>{r.projectName}</span>
+                    <span style={{fontSize:12,color:"var(--txt-muted)",fontFamily:"'Syne'",fontWeight:600}}>{r.projectName}</span>
                   </div>
-                  <p style={{color:"#C0C6E0",fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.excerpt}</p>
+                  <p style={{color:"var(--txt-sub)",fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.excerpt}</p>
                 </div>
               </div>
             );})}
-            {contentResults.length>12&&<p style={{...s.mono10,textAlign:"center",color:"#4B5268"}}>+{contentResults.length-12} more results</p>}
+            {contentResults.length>12&&<p style={{...s.mono10,textAlign:"center",color:"var(--txt-faint)"}}>+{contentResults.length-12} more results</p>}
           </div>
         </div>
       )}
@@ -1638,9 +1661,9 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
       {allProjects.length>0&&(
         <div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <button onClick={()=>setShowFeed(v=>!v)} style={{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",color:"#E8EAF6",fontFamily:"'Syne'",fontWeight:700,fontSize:15}}>
+            <button onClick={()=>setShowFeed(v=>!v)} style={{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",color:"var(--txt)",fontFamily:"'Syne'",fontWeight:700,fontSize:15}}>
               <span style={{color:"#00D4FF"}}>{showFeed?"▾":"▸"}</span> Activity Feed
-              <span style={{...s.mono10,color:"#4B5268",marginLeft:4}}>across all projects</span>
+              <span style={{...s.mono10,color:"var(--txt-faint)",marginLeft:4}}>across all projects</span>
             </button>
             {showFeed&&<div style={{display:"flex",gap:4}}>
               {TIME_PERIODS.map(p=><button key={p.key} className={`q-chip${feedPeriod===p.key?" q-chip-on":""}`} style={{fontSize:11,padding:"3px 9px"}} onClick={()=>setFeedPeriod(p.key)}>{p.label}</button>)}
@@ -1655,15 +1678,15 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
                         <span style={{fontSize:10,fontFamily:"'JetBrains Mono'",color:meta.color,fontWeight:700}}>{meta.label.toUpperCase()}</span>
-                        <span style={{fontSize:12,color:"#6B7290",fontFamily:"'Syne'",fontWeight:600}}>{item.projectName}</span>
-                        {item.title&&<span style={{color:"#C0C6E0",fontSize:13,fontWeight:500}}>{item.title}</span>}
+                        <span style={{fontSize:12,color:"var(--txt-muted)",fontFamily:"'Syne'",fontWeight:600}}>{item.projectName}</span>
+                        {item.title&&<span style={{color:"var(--txt-sub)",fontSize:13,fontWeight:500}}>{item.title}</span>}
                       </div>
-                      {item.content&&<p style={{color:"#8B8FA8",fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.content}</p>}
+                      {item.content&&<p style={{color:"var(--txt-muted)",fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.content}</p>}
                     </div>
                     <span style={{...s.mono10,flexShrink:0,marginTop:3}}>{item.date.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
                   </div>
                 );})}
-                {feedItems.length>30&&<p style={{...s.mono10,textAlign:"center",color:"#4B5268",marginTop:4}}>+{feedItems.length-30} older items</p>}
+                {feedItems.length>30&&<p style={{...s.mono10,textAlign:"center",color:"var(--txt-faint)",marginTop:4}}>+{feedItems.length-30} older items</p>}
               </div>
             )
           )}
@@ -1800,7 +1823,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
           )}
           <button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12}} onClick={onChangelog}>Changelog</button>
           <button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12}} onClick={onEdit}>Edit</button>
-          {project.status!=="archived"&&<button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12,color:"#8B8FA8"}} onClick={onArchive}>Archive</button>}
+          {project.status!=="archived"&&<button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12,color:"var(--txt-muted)"}} onClick={onArchive}>Archive</button>}
           <button className="q-btn-danger" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12}} onClick={onDelete}>Delete</button>
         </div>
       </div>
@@ -1856,7 +1879,7 @@ function OverviewTab({project,latestVer}){
           <div key={st.label} style={s.statCard}><div style={{fontFamily:"'JetBrains Mono'",fontSize:20,fontWeight:700,color:st.color,lineHeight:1}}>{st.value}</div><div style={s.statLbl}>{st.label}</div></div>
         ))}
       </div>
-      {msTotal>0&&<div style={s.infoCard}><div style={s.infoLbl}>Milestone Progress</div><div style={{...s.bar,height:8,marginTop:10}}><div style={{...s.barFill,width:`${pct}%`,height:8,transition:"width .6s"}}/></div><div style={{...s.mono10,marginTop:5,color:"#8B8FA8"}}>{msDone} of {msTotal} complete</div></div>}
+      {msTotal>0&&<div style={s.infoCard}><div style={s.infoLbl}>Milestone Progress</div><div style={{...s.bar,height:8,marginTop:10}}><div style={{...s.barFill,width:`${pct}%`,height:8,transition:"width .6s"}}/></div><div style={{...s.mono10,marginTop:5,color:"var(--txt-muted)"}}>{msDone} of {msTotal} complete</div></div>}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         <input className="q-input" style={{flex:1,minWidth:140,maxWidth:260,marginTop:0}} placeholder="Search feed…" value={search} onChange={e=>setSearch(e.target.value)}/>
         <button className="q-chip" style={{fontFamily:"'JetBrains Mono'",fontSize:11}} onClick={()=>setSortDir(d=>d==="desc"?"asc":"desc")}>{sortDir==="desc"?"↓ Newest":"↑ Oldest"}</button>
@@ -1870,9 +1893,9 @@ function OverviewTab({project,latestVer}){
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
                   <span style={{fontSize:10,fontFamily:"'JetBrains Mono'",color:meta.color,fontWeight:700,letterSpacing:.5}}>{meta.label.toUpperCase()}</span>
-                  {item.title&&<span style={{color:"#E8EAF6",fontWeight:600,fontSize:14}}>{item.title}</span>}
+                  {item.title&&<span style={{color:"var(--txt)",fontWeight:600,fontSize:14}}>{item.title}</span>}
                 </div>
-                {item.content&&<p style={{color:"#8B8FA8",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{item.content.length>200?item.content.slice(0,200)+"…":item.content}</p>}
+                {item.content&&<p style={{color:"var(--txt-muted)",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{item.content.length>200?item.content.slice(0,200)+"…":item.content}</p>}
               </div>
               <div style={{...s.mono10,whiteSpace:"nowrap",flexShrink:0,marginTop:4}}>{item.date.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
             </div>
@@ -1902,7 +1925,7 @@ function VersionsTab({project,onAdd,onDelete,onChangelog}){
                 <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontFamily:"'JetBrains Mono'",color:"#00D4FF",fontWeight:700,fontSize:16}}>{v.version}</span>{i===0&&<span style={{...s.badge,color:"#4ADE80",background:"rgba(74,222,128,0.1)",fontSize:10}}>Latest</span>}</div>
                 <div style={{display:"flex",alignItems:"center",gap:10}}><span style={s.mono10}>{new Date(v.date).toLocaleDateString()}</span><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this version?"))onDelete(v.id);}}>✕</button></div>
               </div>
-              {v.releaseNotes&&<p style={{color:"#B8BDD4",fontSize:14,lineHeight:1.65,marginBottom:10}}>{v.releaseNotes}</p>}
+              {v.releaseNotes&&<p style={{color:"var(--txt-sub)",fontSize:14,lineHeight:1.65,marginBottom:10}}>{v.releaseNotes}</p>}
               {v.fileLinks?.filter(l=>l).length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:7}}>{v.fileLinks.filter(l=>l).map((link,j)=><a key={j} href={link} target="_blank" rel="noreferrer" style={s.fileLink}>↗ {decodeURIComponent(link.split("/").pop()?.split("?")[0]||`File ${j+1}`).slice(0,42)}</a>)}</div>}
             </div>
           ))}
@@ -1924,7 +1947,7 @@ function MilestonesTab({project,onAdd,onToggle,onDelete}){
           {all.map(m=>(
             <div key={m.id} className="q-ms-row" style={{opacity:m.completed?.55:1}}>
               <button className={`q-check${m.completed?" q-check-done":""}`} onClick={()=>onToggle(m.id)}>{m.completed&&"✓"}</button>
-              <div style={{flex:1}}><span style={{color:"#E8EAF6",fontWeight:500,textDecoration:m.completed?"line-through":"none",fontSize:14}}>{m.title}</span>{m.description&&<p style={{color:"#8B8FA8",fontSize:12,marginTop:2}}>{m.description}</p>}</div>
+              <div style={{flex:1}}><span style={{color:"var(--txt)",fontWeight:500,textDecoration:m.completed?"line-through":"none",fontSize:14}}>{m.title}</span>{m.description&&<p style={{color:"var(--txt-muted)",fontSize:12,marginTop:2}}>{m.description}</p>}</div>
               {m.date&&<span style={{...s.mono10,whiteSpace:"nowrap",color:new Date(m.date)<new Date()&&!m.completed?"#FF6B9D":"#8B8FA8"}}>{new Date(m.date).toLocaleDateString()}</span>}
               <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this milestone?"))onDelete(m.id);}}>✕</button>
             </div>
@@ -1957,7 +1980,7 @@ function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSpri
         <button className="q-btn-primary" style={{flexShrink:0,padding:"0 16px"}} onClick={handleAdd}>Add</button>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
-        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,color:"#8B8FA8"}}>
+        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,color:"var(--txt-muted)"}}>
           <input type="checkbox" checked={newRecurring} onChange={e=>setNewRecurring(e.target.checked)} style={{accentColor:"#00D4FF"}}/>
           Recurring
         </label>
@@ -1967,7 +1990,7 @@ function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSpri
       </div>
       {todos.length===0&&<div style={s.empty}><p>No to-do items yet.</p></div>}
       {pending.length>0&&<DraggableList items={pending} onReorder={r=>onReorder([...r,...done])}>{todo=><TodoRow todo={todo} activeSprints={activeSprints} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}} onAssignSprint={sid=>onAssignSprint(todo.id,sid)}/>}</DraggableList>}
-      {done.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",padding:"14px 0 6px",fontWeight:700}}>Completed ({done.length})</div>{done.map(todo=><TodoRow key={todo.id} todo={todo} activeSprints={activeSprints} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}} onAssignSprint={sid=>onAssignSprint(todo.id,sid)}/>)}</>}
+      {done.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",letterSpacing:1.2,textTransform:"uppercase",padding:"14px 0 6px",fontWeight:700}}>Completed ({done.length})</div>{done.map(todo=><TodoRow key={todo.id} todo={todo} activeSprints={activeSprints} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}} onAssignSprint={sid=>onAssignSprint(todo.id,sid)}/>)}</>}
     </div>
   );
 }
@@ -1976,12 +1999,12 @@ function TodoRow({todo,onToggle,onDelete,activeSprints,onAssignSprint}){
   const sprint=activeSprints?.find(sp=>sp.id===todo.sprintId);
   return(
     <div className="q-ms-row" style={{opacity:todo.completed?.5:1}}>
-      <span style={{color:"#3A4060",fontSize:16,cursor:"grab",userSelect:"none",flexShrink:0}}>⠿</span>
+      <span style={{color:"var(--txt-dim)",fontSize:16,cursor:"grab",userSelect:"none",flexShrink:0}}>⠿</span>
       <button className={`q-check${todo.completed?" q-check-done":""}`} onClick={onToggle}>{todo.completed&&"✓"}</button>
       <span style={{fontSize:11,flexShrink:0,marginTop:1}} title={pc.label}>{pc.icon}</span>
       <div style={{flex:1}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-          <span style={{color:"#E8EAF6",fontWeight:500,textDecoration:todo.completed?"line-through":"none",fontSize:14}}>{todo.text}</span>
+          <span style={{color:"var(--txt)",fontWeight:500,textDecoration:todo.completed?"line-through":"none",fontSize:14}}>{todo.text}</span>
           {todo.recurring&&<span style={{fontSize:10,padding:"1px 6px",borderRadius:8,background:"rgba(0,212,255,.08)",color:"#00D4FF",fontFamily:"'JetBrains Mono'"}}>{RECURRENCE_TYPES[todo.recurrenceType]?.icon||"↺"} {RECURRENCE_TYPES[todo.recurrenceType]?.label||"Recurring"}</span>}
           {sprint&&<span style={{fontSize:10,padding:"1px 6px",borderRadius:8,background:"rgba(180,127,255,.1)",color:"#B47FFF",fontFamily:"'Syne'",fontWeight:600}}>{sprint.name}</span>}
         </div>
@@ -2020,11 +2043,11 @@ function NotesTab({project,onAdd,onEdit,onDelete,onReorder}){
         <DraggableList items={isSearching?filtered:notes} onReorder={isSearching?()=>{}:onReorder}>{note=>(
           <div className="q-ver-card" style={{marginBottom:10}}>
             <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
-              {!isSearching&&<span style={{color:"#3A4060",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span>}
+              {!isSearching&&<span style={{color:"var(--txt-dim)",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span>}
               <div style={{flex:1,minWidth:0}}>
                 {mdMode
                   ?<div style={{lineHeight:1.7}}>{renderMarkdown(note.content)}</div>
-                  :<p style={{color:"#B8BDD4",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap"}}>{note.content}</p>
+                  :<p style={{color:"var(--txt-sub)",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap"}}>{note.content}</p>
                 }
               </div>
               <div style={{display:"flex",gap:6,flexShrink:0}}>
@@ -2032,11 +2055,11 @@ function NotesTab({project,onAdd,onEdit,onDelete,onReorder}){
                 <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this note?"))onDelete(note.id);}}>✕</button>
               </div>
             </div>
-            <div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>{new Date(note.createdAt).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"})}</div>
+            <div style={{...s.mono10,marginTop:8,color:"var(--txt-dim)"}}>{new Date(note.createdAt).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"})}</div>
           </div>
         )}</DraggableList>
       )}
-      {mdMode&&notes.length>0&&<p style={{...s.mono10,color:"#4B5268",marginTop:12,textAlign:"center"}}>Markdown on · **bold** *italic* `code` # Heading · toggle above for plain text</p>}
+      {mdMode&&notes.length>0&&<p style={{...s.mono10,color:"var(--txt-faint)",marginTop:12,textAlign:"center"}}>Markdown on · **bold** *italic* `code` # Heading · toggle above for plain text</p>}
     </div>
   );
 }
@@ -2062,13 +2085,13 @@ function AssetsTab({project,onAdd,onDelete,onUploadFile,onLightbox}){
         <div style={{display:"flex",flexDirection:"column",gap:20}}>
           {Object.entries(grouped).map(([type,items])=>(
             <div key={type}>
-              <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>{ASSET_ICONS[type]||"📎"} {type}</div>
+              <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>{ASSET_ICONS[type]||"📎"} {type}</div>
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {items.map(asset=>(
                   <div key={asset.id} className="q-ms-row">
                     {isImg(asset.url)&&<img src={asset.url} alt={asset.name} onClick={()=>onLightbox(asset.url,asset.name)} style={{width:48,height:48,objectFit:"cover",borderRadius:6,cursor:"pointer",flexShrink:0,border:"1px solid var(--border)"}}/>}
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{color:"#E8EAF6",fontWeight:500,fontSize:14}}>{asset.name}</div>
+                      <div style={{color:"var(--txt)",fontWeight:500,fontSize:14}}>{asset.name}</div>
                       <a href={asset.url} target="_blank" rel="noreferrer" style={{...s.fileLink,marginTop:4,display:"inline-block",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>↗ {asset.url.length>60?asset.url.slice(0,60)+"…":asset.url}</a>
                     </div>
                     <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this asset?"))onDelete(asset.id);}}>✕</button>
@@ -2115,11 +2138,11 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
               <div style={{flex:1}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}}>
                   <span style={{...s.badge,color:pc.color,background:pc.bg,fontSize:10}}>{pc.icon} {pc.label}</span>
-                  <span style={{color:"#E8EAF6",fontWeight:600,fontSize:14}}>{iss.title}</span>
+                  <span style={{color:"var(--txt)",fontWeight:600,fontSize:14}}>{iss.title}</span>
                 </div>
-                {iss.description&&<p style={{color:"#8B8FA8",fontSize:13,lineHeight:1.6,marginBottom:8}}>{iss.description}</p>}
+                {iss.description&&<p style={{color:"var(--txt-muted)",fontSize:13,lineHeight:1.6,marginBottom:8}}>{iss.description}</p>}
                 <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
-                  {PRIORITY_KEYS.map(pk=><button key={pk} onClick={()=>onUpdatePriority(iss.id,pk)} style={{fontSize:10,padding:"2px 8px",background:iss.priority===pk?PRIORITY_CONFIG[pk].bg:"transparent",border:`1px solid ${iss.priority===pk?PRIORITY_CONFIG[pk].color:"var(--border-md)"}`,borderRadius:12,color:iss.priority===pk?PRIORITY_CONFIG[pk].color:"#6B7290",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>{PRIORITY_CONFIG[pk].label}</button>)}
+                  {PRIORITY_KEYS.map(pk=><button key={pk} onClick={()=>onUpdatePriority(iss.id,pk)} style={{fontSize:10,padding:"2px 8px",background:iss.priority===pk?PRIORITY_CONFIG[pk].bg:"transparent",border:`1px solid ${iss.priority===pk?PRIORITY_CONFIG[pk].color:"var(--border-md)"}`,borderRadius:12,color:iss.priority===pk?PRIORITY_CONFIG[pk].color:"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>{PRIORITY_CONFIG[pk].label}</button>)}
                 </div>
                 {/* Screenshots */}
                 {(iss.screenshotUrls||[]).length>0&&(
@@ -2133,7 +2156,7 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
                   </div>
                 )}
                 <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                  <div style={{...s.mono10,color:"#2E3558"}}>Logged {new Date(iss.createdAt).toLocaleDateString()}</div>
+                  <div style={{...s.mono10,color:"var(--txt-dim)"}}>Logged {new Date(iss.createdAt).toLocaleDateString()}</div>
                   <button onClick={()=>fileRefs.current[iss.id]?.click()} className="q-btn-ghost" style={{fontSize:11,padding:"2px 10px"}}>Add Screenshot</button>
                   <input ref={el=>fileRefs.current[iss.id]=el} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)onUploadScreenshot(iss.id,f);e.target.value="";}}/>
                   <button onClick={()=>toggleComments(iss.id)} style={{fontSize:11,padding:"2px 10px",background:"transparent",border:"1px solid var(--border-md)",borderRadius:6,color:commentCount>0?"var(--accent)":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",transition:"all .15s"}}>
@@ -2147,9 +2170,9 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
                       <div key={c.id} style={{display:"flex",gap:10,marginBottom:10,alignItems:"flex-start"}}>
                         <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(0,212,255,.1)",border:"1px solid rgba(0,212,255,.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#00D4FF",flexShrink:0,fontFamily:"'Syne'",fontWeight:700}}>U</div>
                         <div style={{flex:1,background:"var(--bg-input)",borderRadius:8,padding:"8px 12px"}}>
-                          <p style={{color:"#C0C6E0",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{c.content}</p>
+                          <p style={{color:"var(--txt-sub)",fontSize:13,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{c.content}</p>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6}}>
-                            <span style={{...s.mono10,color:"#4B5268"}}>{new Date(c.createdAt).toLocaleString()}</span>
+                            <span style={{...s.mono10,color:"var(--txt-faint)"}}>{new Date(c.createdAt).toLocaleString()}</span>
                             <button className="q-del" onClick={async()=>{if(await qConfirm("Delete comment?"))onDeleteComment(iss.id,c.id);}}>✕</button>
                           </div>
                         </div>
@@ -2159,7 +2182,7 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
                       <textarea className="q-input" style={{flex:1,marginTop:0,height:60,resize:"vertical",fontSize:13}} value={commentText[iss.id]||""} onChange={e=>setComment(iss.id,e.target.value)} placeholder="Add a comment…" onKeyDown={e=>{if(e.ctrlKey&&e.key==="Enter"){e.preventDefault();submitComment(iss.id);}}}/>
                       <button className="q-btn-primary" style={{alignSelf:"flex-end",padding:"8px 14px",fontSize:12}} onClick={()=>submitComment(iss.id)}>Post</button>
                     </div>
-                    <p style={{...s.mono10,color:"#4B5268",marginTop:4}}>Ctrl+Enter to post</p>
+                    <p style={{...s.mono10,color:"var(--txt-faint)",marginTop:4}}>Ctrl+Enter to post</p>
                   </div>
                 )}
               </div>
@@ -2171,7 +2194,7 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
           </div>
         );
       })}</div>}
-      {fixed.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Fixed ({fixed.length})</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{fixed.map(iss=>(<div key={iss.id} className="q-ms-row" style={{opacity:.55}}><span style={{width:8,height:8,borderRadius:"50%",background:"#4ADE80",flexShrink:0,marginTop:5}}/><div style={{flex:1}}><span style={{color:"#E8EAF6",fontSize:13,fontWeight:500,textDecoration:"line-through"}}>{iss.title}</span>{iss.fixDescription&&<p style={{color:"#6B7290",fontSize:12,marginTop:2}}>{iss.fixDescription}</p>}<div style={{...s.mono10,marginTop:3,color:"#2E3558"}}>{iss.fixedAt?new Date(iss.fixedAt).toLocaleDateString():""}</div></div><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button></div>))}</div></>}
+      {fixed.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Fixed ({fixed.length})</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{fixed.map(iss=>(<div key={iss.id} className="q-ms-row" style={{opacity:.55}}><span style={{width:8,height:8,borderRadius:"50%",background:"#4ADE80",flexShrink:0,marginTop:5}}/><div style={{flex:1}}><span style={{color:"var(--txt)",fontSize:13,fontWeight:500,textDecoration:"line-through"}}>{iss.title}</span>{iss.fixDescription&&<p style={{color:"var(--txt-muted)",fontSize:12,marginTop:2}}>{iss.fixDescription}</p>}<div style={{...s.mono10,marginTop:3,color:"var(--txt-dim)"}}>{iss.fixedAt?new Date(iss.fixedAt).toLocaleDateString():""}</div></div><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button></div>))}</div></>}
     </div>
   );
 }
@@ -2190,7 +2213,7 @@ function IdeasTab({project,onAdd,onEdit,onPin,onDelete,onReorder}){
   );
 }
 function IdeaRow({idea,onPin,onEdit,onDelete}){
-  return(<div className="q-ver-card" style={{marginBottom:8}}><div style={{display:"flex",gap:10,alignItems:"flex-start"}}><span style={{color:"#3A4060",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span><p style={{color:"#B8BDD4",fontSize:14,lineHeight:1.7,whiteSpace:"pre-wrap",flex:1}}>{idea.content}</p><div style={{display:"flex",gap:4,flexShrink:0}}><button onClick={onPin} title={idea.pinned?"Unpin":"Pin"} style={{fontSize:15,padding:"2px 4px",opacity:idea.pinned?1:.4,transition:"opacity .15s",background:"none",border:"none",cursor:"pointer"}}>⭐</button><button className="q-btn-ghost" style={{padding:"4px 8px",fontSize:12}} onClick={onEdit}>Edit</button><button className="q-del" onClick={onDelete}>✕</button></div></div><div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>{new Date(idea.createdAt).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"})}</div></div>);
+  return(<div className="q-ver-card" style={{marginBottom:8}}><div style={{display:"flex",gap:10,alignItems:"flex-start"}}><span style={{color:"var(--txt-dim)",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span><p style={{color:"var(--txt-sub)",fontSize:14,lineHeight:1.7,whiteSpace:"pre-wrap",flex:1}}>{idea.content}</p><div style={{display:"flex",gap:4,flexShrink:0}}><button onClick={onPin} title={idea.pinned?"Unpin":"Pin"} style={{fontSize:15,padding:"2px 4px",opacity:idea.pinned?1:.4,transition:"opacity .15s",background:"none",border:"none",cursor:"pointer"}}>⭐</button><button className="q-btn-ghost" style={{padding:"4px 8px",fontSize:12}} onClick={onEdit}>Edit</button><button className="q-del" onClick={onDelete}>✕</button></div></div><div style={{...s.mono10,marginTop:8,color:"var(--txt-dim)"}}>{new Date(idea.createdAt).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"})}</div></div>);
 }
 
 // ── Concepts Tab ──────────────────────────────────────────────────────────────
@@ -2213,7 +2236,7 @@ function ConceptsTab({project,onAdd,onDelete,onUploadFile,onLightbox}){
         <div style={{display:"flex",flexDirection:"column",gap:24}}>
           {Object.entries(byType).map(([type,items])=>(
             <div key={type}>
-              <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>{CONCEPT_ICONS[type]} {type}</div>
+              <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>{CONCEPT_ICONS[type]} {type}</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>
                 {items.map(c=><ConceptCard key={c.id} concept={c} onDelete={async()=>{if(await qConfirm("Remove this concept?"))onDelete(c.id);}} onLightbox={onLightbox}/>)}
               </div>
@@ -2229,13 +2252,13 @@ function ConceptCard({concept,onDelete,onLightbox}){
   return(
     <div style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,padding:14,position:"relative"}} className="q-ver-card">
       <button className="q-del" onClick={onDelete} style={{position:"absolute",top:8,right:8}}>✕</button>
-      {concept.label&&<div style={{fontSize:11,color:"#6B7290",marginBottom:8,paddingRight:20,fontWeight:600}}>{concept.label}</div>}
-      {isColor&&<><div style={{width:"100%",height:72,borderRadius:6,background:concept.content,marginBottom:8,boxShadow:"inset 0 0 0 1px rgba(255,255,255,.08)"}}/><div style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#E8EAF6"}}>{concept.content}</div></>}
+      {concept.label&&<div style={{fontSize:11,color:"var(--txt-muted)",marginBottom:8,paddingRight:20,fontWeight:600}}>{concept.label}</div>}
+      {isColor&&<><div style={{width:"100%",height:72,borderRadius:6,background:concept.content,marginBottom:8,boxShadow:"inset 0 0 0 1px rgba(255,255,255,.08)"}}/><div style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--txt)"}}>{concept.content}</div></>}
       {isImage&&<img src={concept.content} alt={concept.label||"concept"} onClick={()=>onLightbox(concept.content,concept.label)} style={{width:"100%",borderRadius:6,objectFit:"cover",maxHeight:180,display:"block",cursor:"pointer"}} onError={e=>e.target.style.display="none"}/>}
       {isAudio&&<audio src={concept.content} controls style={{width:"100%",marginTop:4}}/>}
-      {isCode&&<pre style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"#B8BDD4",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"var(--bg)",padding:10,borderRadius:6,maxHeight:160,overflow:"auto",margin:0}}>{concept.content}</pre>}
+      {isCode&&<pre style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-sub)",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"var(--bg)",padding:10,borderRadius:6,maxHeight:160,overflow:"auto",margin:0}}>{concept.content}</pre>}
       {isLink&&<a href={concept.content} target="_blank" rel="noreferrer" style={{...s.fileLink,display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>↗ {concept.content}</a>}
-      {!isColor&&!isImage&&!isAudio&&!isCode&&!isLink&&<p style={{color:"#B8BDD4",fontSize:13,lineHeight:1.65,whiteSpace:"pre-wrap"}}>{concept.content}</p>}
+      {!isColor&&!isImage&&!isAudio&&!isCode&&!isLink&&<p style={{color:"var(--txt-sub)",fontSize:13,lineHeight:1.65,whiteSpace:"pre-wrap"}}>{concept.content}</p>}
     </div>
   );
 }
@@ -2264,8 +2287,8 @@ function SprintsTab({project,onAdd,onUpdateStatus,onDelete,onAssignTodo}){
             <div key={sp.id} className="q-ver-card" style={{borderLeft:"3px solid #B47FFF"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
                 <div>
-                  <span style={{fontFamily:"'Syne'",fontSize:16,fontWeight:700,color:"#E8EAF6"}}>{sp.name}</span>
-                  {sp.goal&&<p style={{color:"#8B8FA8",fontSize:13,marginTop:3}}>{sp.goal}</p>}
+                  <span style={{fontFamily:"'Syne'",fontSize:16,fontWeight:700,color:"var(--txt)"}}>{sp.name}</span>
+                  {sp.goal&&<p style={{color:"var(--txt-muted)",fontSize:13,marginTop:3}}>{sp.goal}</p>}
                   {(sp.startDate||sp.endDate)&&<div style={{display:"flex",gap:12,marginTop:6}}>
                     {sp.startDate&&<span style={s.mono10}>{new Date(sp.startDate).toLocaleDateString()}</span>}
                     {sp.endDate&&<span style={s.mono10}>→ {new Date(sp.endDate).toLocaleDateString()}</span>}
@@ -2290,23 +2313,23 @@ function SprintsTab({project,onAdd,onUpdateStatus,onDelete,onAssignTodo}){
                       <span style={{fontSize:10,color:PRIORITY_CONFIG[t.priority||"medium"].color}}>{PRIORITY_CONFIG[t.priority||"medium"].icon}</span>
                     </div>
                   ))}
-                  {spTodos.length>6&&<p style={{...s.mono10,color:"#4B5268",marginTop:4}}>+{spTodos.length-6} more — see To-Do tab</p>}
+                  {spTodos.length>6&&<p style={{...s.mono10,color:"var(--txt-faint)",marginTop:4}}>+{spTodos.length-6} more — see To-Do tab</p>}
                 </div>
               </>}
-              {spTodos.length===0&&<p style={{...s.mono10,color:"#4B5268"}}>No tasks assigned. Add tasks in the To-Do tab.</p>}
+              {spTodos.length===0&&<p style={{...s.mono10,color:"var(--txt-faint)"}}>No tasks assigned. Add tasks in the To-Do tab.</p>}
             </div>
           );
         })}
       </div>}
       {completed.length>0&&<>
-        <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4B5268",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Completed ({completed.length})</div>
+        <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Completed ({completed.length})</div>
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
           {completed.map(sp=>{
             const spTodos=todos.filter(t=>t.sprintId===sp.id);
             const done=spTodos.filter(t=>t.completed).length;
             return(
               <div key={sp.id} className="q-ms-row" style={{opacity:.55}}>
-                <div style={{flex:1}}><span style={{color:"#E8EAF6",fontWeight:500}}>{sp.name}</span><span style={{...s.mono10,marginLeft:10}}>{done}/{spTodos.length} tasks</span></div>
+                <div style={{flex:1}}><span style={{color:"var(--txt)",fontWeight:500}}>{sp.name}</span><span style={{...s.mono10,marginLeft:10}}>{done}/{spTodos.length} tasks</span></div>
                 <button className="q-btn-ghost" style={{padding:"3px 10px",fontSize:11}} onClick={()=>onUpdateStatus(sp.id,"active")}>Reopen</button>
                 <button className="q-del" onClick={async()=>{if(await qConfirm(`Delete sprint "${sp.name}"?`))onDelete(sp.id);}}>✕</button>
               </div>
@@ -2598,7 +2621,7 @@ function BuildLogTab({project,onAdd,onUpdateStatus,onDelete}){
             <div key={b.id} className="q-ver-card">
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                  <span style={{fontFamily:"'JetBrains Mono'",fontSize:13,fontWeight:700,color:"#C0C6E0",textTransform:"capitalize"}}>{b.platform}</span>
+                  <span style={{fontFamily:"'JetBrains Mono'",fontSize:13,fontWeight:700,color:"var(--txt-sub)",textTransform:"capitalize"}}>{b.platform}</span>
                   {b.buildNumber&&<span style={{...s.badge,color:"#00D4FF",background:"rgba(0,212,255,.1)",fontSize:10}}>#{b.buildNumber}</span>}
                   {b.buildSize&&<span style={s.mono10}>{b.buildSize}</span>}
                   {verMap[b.versionId]&&<span style={s.mono10}>→ {verMap[b.versionId]}</span>}
@@ -2612,8 +2635,8 @@ function BuildLogTab({project,onAdd,onUpdateStatus,onDelete}){
                   </button>
                 ))}
               </div>
-              {b.notes&&<p style={{color:"#8B8FA8",fontSize:13,lineHeight:1.6,marginTop:8}}>{b.notes}</p>}
-              <div style={{...s.mono10,marginTop:8,color:"#2E3558"}}>{new Date(b.builtAt).toLocaleString()}</div>
+              {b.notes&&<p style={{color:"var(--txt-muted)",fontSize:13,lineHeight:1.6,marginTop:8}}>{b.notes}</p>}
+              <div style={{...s.mono10,marginTop:8,color:"var(--txt-dim)"}}>{new Date(b.builtAt).toLocaleString()}</div>
             </div>
           );})}
         </div>
@@ -2636,7 +2659,7 @@ function EnvironmentsTab({project,onAdd,onEdit,onDelete}){
             <div key={env.id} className="q-ver-card" style={{borderLeft:`3px solid ${env.color||"#8B8FA8"}`}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
                 <div>
-                  <span style={{fontFamily:"'Syne'",fontSize:16,fontWeight:700,color:"#E8EAF6"}}>{env.name}</span>
+                  <span style={{fontFamily:"'Syne'",fontSize:16,fontWeight:700,color:"var(--txt)"}}>{env.name}</span>
                   {env.url&&<a href={env.url} target="_blank" rel="noreferrer" style={{...s.fileLink,marginLeft:10,fontSize:11}}>↗ {env.url.replace(/https?:\/\//,"")}</a>}
                 </div>
                 <div style={{display:"flex",gap:6}}>
@@ -2644,17 +2667,17 @@ function EnvironmentsTab({project,onAdd,onEdit,onDelete}){
                   <button className="q-del" onClick={async()=>{if(await qConfirm(`Delete ${env.name} environment?`))onDelete(env.id);}}>✕</button>
                 </div>
               </div>
-              {env.notes&&<p style={{color:"#8B8FA8",fontSize:13,marginBottom:10}}>{env.notes}</p>}
+              {env.notes&&<p style={{color:"var(--txt-muted)",fontSize:13,marginBottom:10}}>{env.notes}</p>}
               {env.variables?.length>0&&(
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                  <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:4}}>Variables ({env.variables.length})</div>
+                  <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:4}}>Variables ({env.variables.length})</div>
                   {env.variables.map((v,i)=>(
                     <div key={i} style={{display:"flex",gap:8,alignItems:"center",padding:"5px 10px",background:"var(--bg-input)",borderRadius:6}}>
                       <span style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#00D4FF",minWidth:100,flexShrink:0}}>{v.key}</span>
-                      <span style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#B8BDD4",flex:1,wordBreak:"break-all"}}>
+                      <span style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--txt-sub)",flex:1,wordBreak:"break-all"}}>
                         {v.masked&&!revealed[`${env.id}-${i}`] ? "••••••••••••" : v.value}
                       </span>
-                      {v.masked&&<button onClick={()=>toggle(env.id,i)} style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",background:"none",border:"none",cursor:"pointer"}}>{revealed[`${env.id}-${i}`]?"hide":"show"}</button>}
+                      {v.masked&&<button onClick={()=>toggle(env.id,i)} style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",background:"none",border:"none",cursor:"pointer"}}>{revealed[`${env.id}-${i}`]?"hide":"show"}</button>}
                     </div>
                   ))}
                 </div>
@@ -2682,18 +2705,18 @@ function DependenciesTab({project,onAdd,onUpdateStatus,onDelete}){
         <div style={{display:"flex",flexDirection:"column",gap:20}}>
           {Object.entries(grouped).map(([type,items])=>(
             <div key={type}>
-              <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>{type}</div>
+              <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>{type}</div>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
                 {items.map(dep=>{const ds=DEP_STATUSES[dep.status]||DEP_STATUSES.ok;return(
                   <div key={dep.id} className="q-ms-row" style={{padding:"10px 12px"}}>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                        <span style={{color:"#E8EAF6",fontWeight:600,fontSize:14,fontFamily:"'JetBrains Mono'"}}>{dep.name}</span>
-                        {dep.currentVersion&&<span style={{...s.mono10,color:"#6B7290"}}>{dep.currentVersion}</span>}
+                        <span style={{color:"var(--txt)",fontWeight:600,fontSize:14,fontFamily:"'JetBrains Mono'"}}>{dep.name}</span>
+                        {dep.currentVersion&&<span style={{...s.mono10,color:"var(--txt-muted)"}}>{dep.currentVersion}</span>}
                         {dep.latestVersion&&dep.latestVersion!==dep.currentVersion&&<span style={{...s.mono10,color:"#FFB347"}}>→ {dep.latestVersion}</span>}
                         <span style={{fontSize:10,fontWeight:700,color:ds.color,background:`${ds.color}18`,border:`1px solid ${ds.color}30`,padding:"2px 7px",borderRadius:12,fontFamily:"'Syne'"}}>{ds.icon} {ds.label}</span>
                       </div>
-                      {dep.notes&&<p style={{color:"#8B8FA8",fontSize:12,marginTop:3}}>{dep.notes}</p>}
+                      {dep.notes&&<p style={{color:"var(--txt-muted)",fontSize:12,marginTop:3}}>{dep.notes}</p>}
                     </div>
                     <div style={{display:"flex",gap:5,flexShrink:0}}>
                       {Object.entries(DEP_STATUSES).map(([k,v])=>(
@@ -2948,8 +2971,8 @@ function IssueForm({data,setData,onSubmit,onCancel}){
     </div>
   );
 }
-function FixIssueModal({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Mark Issue Fixed</h2><div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.15)",borderRadius:8,padding:"10px 14px",marginBottom:16}}><p style={{color:"#4ADE80",fontSize:13,fontWeight:600}}>{data.title}</p>{data.description&&<p style={{color:"#8B8FA8",fontSize:12,marginTop:4}}>{data.description}</p>}</div><Field label="How was it fixed? *"><textarea className="q-input" style={{height:120,resize:"vertical"}} autoFocus value={data.fixDescription||""} onChange={e=>set("fixDescription",e.target.value)} placeholder="Describe the fix…"/></Field><p style={{fontSize:12,color:"#6B7290",marginTop:6}}>A note will be automatically created with this fix.</p><FormActions onCancel={onCancel} onSubmit={()=>data.fixDescription?.trim()&&onSubmit(data)} submitLabel="Mark Fixed"/></div>);}
-function IdeaForm({data,setData,title,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>{title}</h2><Field label="Idea *"><textarea className="q-input" style={{height:140,resize:"vertical"}} autoFocus value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Your idea…"/></Field><p style={{fontSize:12,color:"#6B7290",marginTop:4}}>Ideas don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Save Idea"/></div>);}
+function FixIssueModal({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Mark Issue Fixed</h2><div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.15)",borderRadius:8,padding:"10px 14px",marginBottom:16}}><p style={{color:"#4ADE80",fontSize:13,fontWeight:600}}>{data.title}</p>{data.description&&<p style={{color:"var(--txt-muted)",fontSize:12,marginTop:4}}>{data.description}</p>}</div><Field label="How was it fixed? *"><textarea className="q-input" style={{height:120,resize:"vertical"}} autoFocus value={data.fixDescription||""} onChange={e=>set("fixDescription",e.target.value)} placeholder="Describe the fix…"/></Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:6}}>A note will be automatically created with this fix.</p><FormActions onCancel={onCancel} onSubmit={()=>data.fixDescription?.trim()&&onSubmit(data)} submitLabel="Mark Fixed"/></div>);}
+function IdeaForm({data,setData,title,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>{title}</h2><Field label="Idea *"><textarea className="q-input" style={{height:140,resize:"vertical"}} autoFocus value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Your idea…"/></Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:4}}>Ideas don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Save Idea"/></div>);}
 function ConceptForm({data,setData,cfg,session,projectId,onSubmit,onUploadFile,onCancel}){
   const set=(k,v)=>setData(d=>({...d,[k]:v}));
   const fileRef=useRef(null);
@@ -2965,7 +2988,7 @@ function ConceptForm({data,setData,cfg,session,projectId,onSubmit,onUploadFile,o
     case "link": return<input className="q-input" value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="https://..."/>;
     default:     return<textarea className="q-input" style={{height:100,resize:"vertical"}} value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Enter text…"/>;
   }};
-  return(<div><h2 style={s.modalTitle}>Add Concept</h2><Field label="Type"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{CONCEPT_TYPES.map(t=><button key={t} className={`q-chip${data.type===t?" q-chip-on":""}`} onClick={()=>set("type",t)}>{CONCEPT_ICONS[t]} {t}</button>)}</div></Field><Field label="Label (optional)"><input className="q-input" value={data.label||""} onChange={e=>set("label",e.target.value)} placeholder="Name this concept…"/></Field><Field label="Content">{renderInput()}</Field><p style={{fontSize:12,color:"#6B7290",marginTop:4}}>Concepts don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Add Concept"/></div>);
+  return(<div><h2 style={s.modalTitle}>Add Concept</h2><Field label="Type"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{CONCEPT_TYPES.map(t=><button key={t} className={`q-chip${data.type===t?" q-chip-on":""}`} onClick={()=>set("type",t)}>{CONCEPT_ICONS[t]} {t}</button>)}</div></Field><Field label="Label (optional)"><input className="q-input" value={data.label||""} onChange={e=>set("label",e.target.value)} placeholder="Name this concept…"/></Field><Field label="Content">{renderInput()}</Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:4}}>Concepts don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Add Concept"/></div>);
 }
 
 function BuildLogForm({data,setData,versions,onSubmit,onCancel}){
@@ -3066,7 +3089,7 @@ function GitHubTab({project,data,onRefresh,onLoadCache}){
     return(
       <div style={s.empty}>
         <p>No GitHub repository linked.</p>
-        <p style={{fontSize:13,color:"#4B5268",marginTop:4}}>Add a GitHub URL in Edit Project to enable this tab.</p>
+        <p style={{fontSize:13,color:"var(--txt-faint)",marginTop:4}}>Add a GitHub URL in Edit Project to enable this tab.</p>
       </div>
     );
   }
@@ -3076,13 +3099,13 @@ function GitHubTab({project,data,onRefresh,onLoadCache}){
       <div style={s.tabBar}>
         <div>
           <a href={ghUrl} target="_blank" rel="noreferrer" style={{...s.fileLink,fontSize:13}}>{repo.owner}/{repo.repo}</a>
-          {data?.fetchedAt&&<span style={{...s.mono10,marginLeft:10,color:"#4B5268"}}>Updated {new Date(data.fetchedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span>}
+          {data?.fetchedAt&&<span style={{...s.mono10,marginLeft:10,color:"var(--txt-faint)"}}>Updated {new Date(data.fetchedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span>}
         </div>
         <button className="q-btn-primary" onClick={onRefresh}>⟳ Refresh</button>
       </div>
 
       {!data&&(
-        <div style={s.empty}><p>Click Refresh to load GitHub data.</p><p style={{...s.mono10,marginTop:6,color:"#4B5268"}}>Public repos: 60 req/hr · Private: add GitHub token in Settings</p></div>
+        <div style={s.empty}><p>Click Refresh to load GitHub data.</p><p style={{...s.mono10,marginTop:6,color:"var(--txt-faint)"}}>Public repos: 60 req/hr · Private: add GitHub token in Settings</p></div>
       )}
 
       {data?.error&&<div style={{padding:"10px 14px",background:"rgba(255,100,100,.08)",border:"1px solid rgba(255,100,100,.2)",borderRadius:8,color:"#FF7090",fontSize:13,marginBottom:16}}>{data.error}</div>}
@@ -3091,14 +3114,14 @@ function GitHubTab({project,data,onRefresh,onLoadCache}){
         {/* Commits */}
         {data.commits?.length>0&&(
           <div style={{marginBottom:24}}>
-            <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#6B7290",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Recent Commits ({data.commits.length})</div>
+            <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Recent Commits ({data.commits.length})</div>
             <div style={{display:"flex",flexDirection:"column",gap:4}}>
               {data.commits.map(c=>(
                 <div key={c.sha} style={{display:"flex",gap:10,padding:"9px 12px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:8,alignItems:"flex-start"}}>
                   <a href={c.url} target="_blank" rel="noreferrer" style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"#00D4FF",flexShrink:0,marginTop:2,minWidth:50}}>{c.sha}</a>
                   <div style={{flex:1,minWidth:0}}>
-                    <p style={{color:"#C0C6E0",fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.message}</p>
-                    <p style={{...s.mono10,color:"#4B5268",marginTop:2}}>{c.author} · {c.date?new Date(c.date).toLocaleDateString():""}</p>
+                    <p style={{color:"var(--txt-sub)",fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.message}</p>
+                    <p style={{...s.mono10,color:"var(--txt-faint)",marginTop:2}}>{c.author} · {c.date?new Date(c.date).toLocaleDateString():""}</p>
                   </div>
                 </div>
               ))}
@@ -3113,8 +3136,8 @@ function GitHubTab({project,data,onRefresh,onLoadCache}){
             <div style={{display:"flex",flexDirection:"column",gap:4}}>
               {data.issues.map(i=>(
                 <div key={i.id} style={{display:"flex",gap:10,padding:"9px 12px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:8,alignItems:"center"}}>
-                  <span style={{...s.mono10,color:"#4B5268",flexShrink:0}}>#{i.id}</span>
-                  <a href={i.url} target="_blank" rel="noreferrer" style={{color:"#C0C6E0",fontSize:13,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:"none"}}>{i.title}</a>
+                  <span style={{...s.mono10,color:"var(--txt-faint)",flexShrink:0}}>#{i.id}</span>
+                  <a href={i.url} target="_blank" rel="noreferrer" style={{color:"var(--txt-sub)",fontSize:13,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:"none"}}>{i.title}</a>
                   <div style={{display:"flex",gap:4,flexShrink:0}}>{i.labels?.slice(0,2).map(l=><span key={l} style={{fontSize:10,padding:"2px 6px",borderRadius:8,background:"rgba(0,212,255,.08)",color:"#6EB8D0",fontFamily:"'JetBrains Mono'"}}>{l}</span>)}</div>
                 </div>
               ))}
@@ -3129,10 +3152,10 @@ function GitHubTab({project,data,onRefresh,onLoadCache}){
             <div style={{display:"flex",flexDirection:"column",gap:4}}>
               {data.prs.map(pr=>(
                 <div key={pr.id} style={{display:"flex",gap:10,padding:"9px 12px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:8,alignItems:"center"}}>
-                  <span style={{...s.mono10,color:"#4B5268",flexShrink:0}}>#{pr.id}</span>
-                  {pr.draft&&<span style={{fontSize:10,padding:"2px 6px",borderRadius:6,background:"rgba(139,143,168,.12)",color:"#8B8FA8",flexShrink:0}}>Draft</span>}
-                  <a href={pr.url} target="_blank" rel="noreferrer" style={{color:"#C0C6E0",fontSize:13,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:"none"}}>{pr.title}</a>
-                  {pr.base&&<span style={{...s.mono10,color:"#4B5268",flexShrink:0}}>→ {pr.base}</span>}
+                  <span style={{...s.mono10,color:"var(--txt-faint)",flexShrink:0}}>#{pr.id}</span>
+                  {pr.draft&&<span style={{fontSize:10,padding:"2px 6px",borderRadius:6,background:"rgba(139,143,168,.12)",color:"var(--txt-muted)",flexShrink:0}}>Draft</span>}
+                  <a href={pr.url} target="_blank" rel="noreferrer" style={{color:"var(--txt-sub)",fontSize:13,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:"none"}}>{pr.title}</a>
+                  {pr.base&&<span style={{...s.mono10,color:"var(--txt-faint)",flexShrink:0}}>→ {pr.base}</span>}
                 </div>
               ))}
             </div>
@@ -3153,7 +3176,7 @@ function SaveTemplateModal({data,setData,onSubmit,onCancel}){
   return(
     <div>
       <h2 style={s.modalTitle}>Save as Template</h2>
-      <p style={{color:"#8B8FA8",fontSize:13,marginBottom:16,lineHeight:1.6}}>Saves this project's status, tech stack, links, milestones, open todos, and environments as a reusable template. Masked environment variables are excluded.</p>
+      <p style={{color:"var(--txt-muted)",fontSize:13,marginBottom:16,lineHeight:1.6}}>Saves this project's status, tech stack, links, milestones, open todos, and environments as a reusable template. Masked environment variables are excluded.</p>
       <Field label="Template Name *"><input className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., React Native App Starter" autoFocus/></Field>
       <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&onSubmit(data)} submitLabel="Save Template"/>
     </div>
@@ -3166,15 +3189,15 @@ function ManageTemplatesModal({templates,onDelete,onApply,onCancel}){
     <div>
       <h2 style={s.modalTitle}>Project Templates</h2>
       {(!templates||templates.length===0)?(
-        <div style={s.empty}><p>No templates yet.</p><p style={{fontSize:13,color:"#4B5268",marginTop:4}}>Save a project as a template using the Save Template button.</p></div>
+        <div style={s.empty}><p>No templates yet.</p><p style={{fontSize:13,color:"var(--txt-faint)",marginTop:4}}>Save a project as a template using the Save Template button.</p></div>
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
           {templates.map(t=>(
             <div key={t.id} style={{display:"flex",gap:12,padding:"13px 16px",background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:10,alignItems:"center"}}>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{color:"#E8EAF6",fontWeight:600,fontSize:14}}>{t.name}</div>
-                {t.description&&<div style={{color:"#8B8FA8",fontSize:12,marginTop:2}}>{t.description}</div>}
-                <div style={{...s.mono10,color:"#4B5268",marginTop:4}}>
+                <div style={{color:"var(--txt)",fontWeight:600,fontSize:14}}>{t.name}</div>
+                {t.description&&<div style={{color:"var(--txt-muted)",fontSize:12,marginTop:2}}>{t.description}</div>}
+                <div style={{...s.mono10,color:"var(--txt-faint)",marginTop:4}}>
                   {t.templateData?.milestones?.length||0} milestones · {t.templateData?.todos?.length||0} todos · {t.templateData?.techStack?.length||0} stack items
                 </div>
               </div>
@@ -3229,7 +3252,7 @@ function ChangelogModal({project,onClose,onPublishRelease}){
 
       {/* Generated changelog */}
       <div style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:18,maxHeight:"40vh",overflowY:"auto",marginBottom:16}}>
-        <pre style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"#B8BDD4",whiteSpace:"pre-wrap",lineHeight:1.7,margin:0}}>{md}</pre>
+        <pre style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--txt-sub)",whiteSpace:"pre-wrap",lineHeight:1.7,margin:0}}>{md}</pre>
       </div>
 
       {/* GitHub Release publisher */}
@@ -3246,15 +3269,15 @@ function ChangelogModal({project,onClose,onPublishRelease}){
           ):(
             <>
               <div style={{marginBottom:10}}>
-                <label style={{display:"block",fontSize:11,color:"#6B7290",fontWeight:700,letterSpacing:".5px",textTransform:"uppercase",marginBottom:6}}>GitHub Token (with Contents: Write)</label>
+                <label style={{display:"block",fontSize:11,color:"var(--txt-muted)",fontWeight:700,letterSpacing:".5px",textTransform:"uppercase",marginBottom:6}}>GitHub Token (with Contents: Write)</label>
                 <div style={{display:"flex",gap:8}}>
                   <input className="q-input" type={showToken?"text":"password"} style={{flex:1,marginTop:0,fontFamily:"'JetBrains Mono'",fontSize:12}} value={ghToken} onChange={e=>saveToken(e.target.value)} placeholder="ghp_xxxxxxxxxxxx"/>
                   <button className="q-btn-ghost" style={{padding:"0 12px",fontSize:12}} onClick={()=>setShowToken(v=>!v)}>{showToken?"Hide":"Show"}</button>
                 </div>
-                <p style={{...s.mono10,marginTop:5,color:"#4B5268"}}>Saved locally on this device. Tag: {latestVer?`v${latestVer.version}`:"no versions yet"} · Repo: {repo.owner}/{repo.repo}</p>
+                <p style={{...s.mono10,marginTop:5,color:"var(--txt-faint)"}}>Saved locally on this device. Tag: {latestVer?`v${latestVer.version}`:"no versions yet"} · Repo: {repo.owner}/{repo.repo}</p>
               </div>
               <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,color:"#8B8FA8"}}>
+                <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,color:"var(--txt-muted)"}}>
                   <input type="checkbox" checked={draft} onChange={e=>setDraft(e.target.checked)} style={{accentColor:"#00D4FF"}}/>
                   Save as draft
                 </label>
@@ -3272,7 +3295,7 @@ function ChangelogModal({project,onClose,onPublishRelease}){
         </div>
       )}
 
-      <p style={{...s.mono10,color:"#4B5268",marginTop:12}}>
+      <p style={{...s.mono10,color:"var(--txt-faint)",marginTop:12}}>
         {project.versions?.length||0} versions · {project.issues?.filter(i=>i.status==="fixed").length||0} fixed issues
       </p>
     </div>
@@ -3313,7 +3336,7 @@ function ConfirmDialog({msg,onYes,onNo}){
     <>
       <div style={{position:"fixed",inset:0,background:"var(--overlay)",zIndex:1100}}/>
       <div style={{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1101,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:14,padding:"28px 32px",maxWidth:380,width:"90%",boxShadow:"0 16px 48px rgba(0,0,0,.6)"}}>
-        <p style={{fontFamily:"'Syne'",fontSize:15,fontWeight:600,color:"#E8EAF6",lineHeight:1.5,marginBottom:24}}>{msg}</p>
+        <p style={{fontFamily:"'Syne'",fontSize:15,fontWeight:600,color:"var(--txt)",lineHeight:1.5,marginBottom:24}}>{msg}</p>
         <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
           <button className="q-btn-ghost" onClick={onNo} autoFocus>Cancel</button>
           <button className="q-btn-danger" style={{borderColor:"#FF4466",color:"#FF7090"}} onClick={onYes}>Delete</button>
