@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.7.7";
+const APP_VER    = "v0.7.8";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -76,8 +76,8 @@ const TECH_TAGS=[
   "WebGL","OpenGL","Vulkan","DirectX","SFML","SDL2","Box2D","Bullet Physics",
   "C#","C++","GDScript","Lua","HLSL","GLSL",
 ];
-const ASSET_TYPES=["Link","Icon","Splash Screen","Screenshot","Document","APK / Build","Other"];
-const ASSET_ICONS={Link:"🔗",Icon:"🖼","Splash Screen":"📱",Screenshot:"🖥",Document:"📄","APK / Build":"📦",Other:"📎"};
+const ASSET_TYPES=["Link","Image","Document","Code","APK / Build","Icon","Splash Screen","Screenshot","Audio","Color","Other"];
+const ASSET_ICONS={Link:"🔗",Image:"🖼",Document:"📄",Code:"💻","APK / Build":"📦",Icon:"🎨","Splash Screen":"📱",Screenshot:"🖥",Audio:"🎙",Color:"🎨",Other:"📎"};
 const CONCEPT_TYPES=["text","color","image","code","audio","link"];
 const CONCEPT_ICONS={text:"📝",color:"🎨",image:"🖼",code:"💻",audio:"🎙",link:"🔗"};
 
@@ -266,6 +266,14 @@ function QTextarea({className="q-input",style,value,onChange,onKeyDown,placehold
   );
 }
 
+function PinIcon({size=13,active=false}){
+  return(
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" style={{color:active?"#FFB347":"var(--txt-dim)",transition:"color .15s"}}>
+      <path d="M12 2L18 8L13.5 12.5L15 18L10 15.5L5 18L6.5 12.5L2 8L8 2L10 5L12 2Z" fill="currentColor" fillOpacity={active?0.9:0.25} stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+      <line x1="10" y1="5" x2="10" y2="9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+    </svg>
+  );
+}
 function FolderIcon({size=13}){return(<svg width={size} height={size} viewBox="0 0 20 16" fill="none" style={{color:"var(--accent-text)"}}><path d="M1 2.5C1 1.67 1.67 1 2.5 1H7.5L9.5 3.5H17.5C18.33 3.5 19 4.17 19 5V13.5C19 14.33 18.33 15 17.5 15H2.5C1.67 15 1 14.33 1 13.5V2.5Z" fill="currentColor" fillOpacity="0.18" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/></svg>);}
 
 // ── Supabase client ───────────────────────────────────────────────────────────
@@ -1799,36 +1807,34 @@ export default function QoderApp() {
                   <div style={s.navSection}>Projects</div>
                   <button onClick={()=>openModal("add-group",{})} title="New group" style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:14,padding:"14px 12px 5px",lineHeight:1}}>+⊟</button>
                 </div>
-                {/* Grouped projects — draggable group order */}
+                {/* Grouped projects — draggable group order + draggable projects within group */}
                 {(()=>{
                   let dragG=null;
                   const onDragStartG=i=>{dragG=i;};
                   const onDragOverG=(e,i)=>{e.preventDefault();if(dragG===null||dragG===i)return;const n=[...grouped];const[m]=n.splice(dragG,1);n.splice(i,0,m);reorderGroups(n.map(g=>({...g})));dragG=i;};
                   return grouped.map((g,gi)=>(
-                    <div key={g.id} draggable onDragStart={()=>onDragStartG(gi)} onDragOver={e=>onDragOverG(e,gi)} onDragEnd={()=>{dragG=null;}}
-                      style={{
-                        marginTop: gi>0 ? 6 : 0,
-                        paddingTop: gi>0 ? 6 : 0,
-                        borderTop: gi>0 ? "1px solid var(--border-lg)" : "none",
-                      }}>
-                      <div style={{display:"flex",alignItems:"center",padding:"4px 12px 4px 10px",gap:6,cursor:"grab",
-                        borderLeft: g.color ? `2px solid ${g.color}40` : "2px solid transparent",
-                        marginLeft:6, borderRadius:"0 4px 4px 0",
-                      }}>
+                    <div key={g.id}
+                      style={{marginTop:gi>0?6:0,paddingTop:gi>0?6:0,borderTop:gi>0?"1px solid var(--border-lg)":"none"}}>
+                      {/* Group heading — draggable for reorder, droppable for project assignment */}
+                      <div draggable onDragStart={()=>onDragStartG(gi)} onDragOver={e=>{onDragOverG(e,gi);e.currentTarget.style.background="var(--accent-dim)";}} onDragEnd={()=>{dragG=null;}} onDragLeave={e=>e.currentTarget.style.background=""} onDrop={e=>{e.currentTarget.style.background="";const pid=e.dataTransfer.getData("projectId");if(pid)assignProjectToGroup(pid,g.id);}}
+                        style={{display:"flex",alignItems:"center",padding:"4px 12px 4px 10px",gap:6,cursor:"grab",borderLeft:g.color?`2px solid ${g.color}40`:"2px solid transparent",marginLeft:6,borderRadius:"0 4px 4px 0",transition:"background .1s"}}>
                         <span style={{color:"var(--txt-dim)",fontSize:11,userSelect:"none",flexShrink:0}}>⠿</span>
                         {g.color&&<span style={{width:6,height:6,borderRadius:"50%",background:g.color,flexShrink:0}}/>}
                         <span style={{fontSize:10,fontWeight:700,letterSpacing:"1.2px",color:g.color||"var(--txt-faint)",textTransform:"uppercase",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",opacity:g.color?0.85:1}}>{g.name}</span>
                         <button onClick={async e=>{e.stopPropagation();if(await qConfirm(`Delete group "${g.name}"? Projects will be ungrouped.`))deleteGroup(g.id);}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:11,padding:"0 2px",lineHeight:1}} className="q-group-del">✕</button>
                       </div>
-                      {g.items.map(p=><NavBtn key={p.id} active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/>)}
+                      {/* Projects within group — individually draggable */}
+                      <DraggableSidebarList items={g.items} onReorder={reordered=>{const allActive=active.filter(p=>p.groupId!==g.id);setProjects([...allActive,...reordered,...archived]);reordered.forEach((p,i)=>sb.patch(cfg.url,cfg.key,T(),"projects",p.id,{position:i}).catch(()=>{}));}}>
+                        {p=><div draggable onDragStart={e=>{e.dataTransfer.setData("projectId",p.id);e.stopPropagation();}} onDragOver={e=>{if(draggedTodo)e.preventDefault();setDragOverPid(p.id);}} onDragLeave={()=>setDragOverPid(null)} onDrop={()=>handleTodoDrop(p.id)} style={{borderRadius:7,outline:draggedTodo&&dragOverPid===p.id?"2px dashed var(--accent)":"2px dashed transparent",transition:"outline .1s"}}><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/></div>}
+                      </DraggableSidebarList>
                     </div>
                   ));
                 })()}
                 {/* Ungrouped projects */}
                 {ungrouped.length>0&&<>
-                  {grouped.some(g=>g.items.length>0)&&<div style={{...s.navSection,marginTop:4,opacity:.5}}>Other</div>}
+                  {grouped.some(g=>g.items.length>0)&&<div onDragOver={e=>e.preventDefault()} onDrop={e=>{const pid=e.dataTransfer.getData("projectId");if(pid)assignProjectToGroup(pid,null);}} style={{...s.navSection,marginTop:4,opacity:.5,cursor:"default"}} title="Drop here to ungroup">Other</div>}
                   <DraggableSidebarList items={ungrouped} onReorder={reorderProjects}>
-                    {p=><div onDragOver={e=>{if(draggedTodo)e.preventDefault();setDragOverPid(p.id);}} onDragLeave={()=>setDragOverPid(null)} onDrop={()=>handleTodoDrop(p.id)} style={{borderRadius:7,outline:draggedTodo&&dragOverPid===p.id?"2px dashed var(--accent)":"2px dashed transparent",transition:"outline .1s"}}><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/></div>}
+                    {p=><div draggable onDragStart={e=>e.dataTransfer.setData("projectId",p.id)} onDragOver={e=>{if(draggedTodo)e.preventDefault();setDragOverPid(p.id);}} onDragLeave={()=>setDragOverPid(null)} onDrop={()=>handleTodoDrop(p.id)} style={{borderRadius:7,outline:draggedTodo&&dragOverPid===p.id?"2px dashed var(--accent)":"2px dashed transparent",transition:"outline .1s"}}><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/></div>}
                   </DraggableSidebarList>
                 </>}
                 {archived.length>0&&<>
@@ -2329,7 +2335,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
       {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates||[]} onApplyChecklist={onApplyChecklist} onSaveAsTemplate={onSaveAsTemplate} onDragTodo={onDragTodo}/>}
       {tab==="snippets"   &&<SnippetsTab   project={project} onAdd={onAddSnippet} onEdit={onEditSnippet} onDelete={onDeleteSnippet}/>}
       {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession}/>}
-      {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes}/>}
+      {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes} onPin={onPinNote}/>}
       {tab==="assets"     &&<AssetsTab     project={project} onAdd={onAddAsset}     onDelete={onDeleteAsset}    onUploadFile={onUploadAssetFile} onLightbox={onLightbox}/>}
       {tab==="issues"     &&<IssuesTab     project={project} onAdd={onAddIssue}     onFix={onFixIssue}         onDelete={onDeleteIssue}  onUpdatePriority={onUpdateIssuePriority} onUploadScreenshot={onUploadIssueScreenshot} onRemoveScreenshot={onRemoveIssueScreenshot} onAddComment={onAddIssueComment} onDeleteComment={onDeleteIssueComment} onLightbox={onLightbox}/>}
       {tab==="build-log"  &&<BuildLogTab   project={project} onAdd={onAddBuildLog}   onUpdateStatus={onUpdateBuildStatus} onDelete={onDeleteBuildLog}/>}
@@ -2601,7 +2607,7 @@ function NotesTab({project,onAdd,onEdit,onDelete,onReorder,onPin}){
   const isSearching=!!search.trim();
   // Render function (not a component) — avoids React reconciliation crash from inner component definitions
   const renderNote=(note,draggable=false)=>(
-    <div key={note.id} className="q-ver-card" style={{marginBottom:10,borderLeft:note.pinned?"2px solid #FFB347":"none",paddingLeft:note.pinned?10:0}}>
+    <div key={note.id} className="q-ver-card" style={{marginBottom:10,borderLeft:note.pinned?"2px solid #FFB347":"1px solid var(--border)",paddingLeft:14}}>
       <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
         {draggable&&!isSearching&&<span style={{color:"var(--txt-dim)",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span>}
         <div style={{flex:1,minWidth:0}}>
@@ -2611,7 +2617,7 @@ function NotesTab({project,onAdd,onEdit,onDelete,onReorder,onPin}){
           }
         </div>
         <div style={{display:"flex",gap:4,flexShrink:0}}>
-          <button title={note.pinned?"Unpin":"Pin note"} onClick={()=>onPin(note.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:14,opacity:note.pinned?1:.35,padding:"2px 4px",transition:"opacity .15s"}} onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=note.pinned?1:.35}>📌</button>
+          <button title={note.pinned?"Unpin":"Pin note"} onClick={()=>onPin&&onPin(note.id)} style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",display:"flex",alignItems:"center"}}><PinIcon size={14} active={note.pinned}/></button>
           <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit(note)}>Edit</button>
           <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this note?"))onDelete(note.id);}}>✕</button>
         </div>
@@ -4320,7 +4326,7 @@ function ConfirmDialog({msg,onYes,onNo}){
   );
 }
 function Toast({msg,type}){const c={ok:{bg:"var(--toast-ok-bg)",border:"#4ADE80",text:"#4ADE80",icon:"✓"},err:{bg:"var(--toast-err-bg)",border:"#FF4466",text:"#FF7090",icon:"✕"},info:{bg:"var(--toast-info-bg)",border:"var(--accent)",text:"var(--accent)",icon:"ℹ"}}[type]||{bg:"var(--toast-ok-bg)",border:"#4ADE80",text:"#4ADE80",icon:"✓"};return<div style={{position:"fixed",bottom:24,right:24,zIndex:9999,background:c.bg,border:`1px solid ${c.border}`,color:c.text,padding:"10px 18px",borderRadius:9,fontSize:13,maxWidth:320,fontFamily:"'Syne'",fontWeight:600,boxShadow:"0 4px 24px rgba(0,0,0,.3)",lineHeight:1.5}}>{c.icon} {msg}</div>;}
-function Splash({msg}){return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--bg)",color:"var(--accent)",fontFamily:"'JetBrains Mono'",fontSize:13}}>{msg}</div>;}
+function Splash({msg}){return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--bg)"}}><span style={{color:"#00D4FF",fontFamily:"'JetBrains Mono'",fontSize:15,fontWeight:700,letterSpacing:1}}>{msg}</span></div>;}
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 const css=`
