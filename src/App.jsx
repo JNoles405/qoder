@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.8.5";
+const APP_VER    = "v0.8.6";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -162,10 +162,18 @@ input[type=color]{filter:brightness(0.97);}`:``}
 }
 
 const RECURRENCE_TYPES = {
-  daily:       { label:"Daily",       icon:"↺" },
-  weekly:      { label:"Weekly",      icon:"↻" },
-  "per-release":{ label:"Per Release",icon:"⟳" },
+  daily:       { label:"Daily",       icon:"↺", days:1   },
+  weekly:      { label:"Weekly",      icon:"↻", days:7   },
+  "per-release":{ label:"Per Release",icon:"⟳", days:null },
 };
+function getNextDueDate(recurrenceType){
+  const rt=RECURRENCE_TYPES[recurrenceType];
+  if(!rt||!rt.days)return null; // per-release has no fixed date
+  const d=new Date();
+  d.setDate(d.getDate()+rt.days);
+  d.setHours(0,0,0,0);
+  return d.toISOString();
+}
 
 function fmtDuration(seconds){
   if(!seconds||seconds<0)return"0m";
@@ -342,7 +350,7 @@ async function loadProjects(url,key,token,userId){
     versions:    vers.filter(v=>v.project_id===p.id).map(v=>({id:v.id,version:v.version,releaseNotes:v.release_notes,date:v.date,fileLinks:v.file_links||[]})),
     milestones:  miles.filter(m=>m.project_id===p.id).map(m=>({id:m.id,title:m.title,description:m.description,date:m.date,completed:m.completed,completedAt:m.completed_at,createdAt:m.created_at})),
     notes:       notes.filter(n=>n.project_id===p.id).map(n=>({id:n.id,content:n.content,position:n.position,pinned:n.pinned||false,createdAt:n.created_at})),
-    todos:       todos.filter(t=>t.project_id===p.id).map(t=>({id:t.id,text:t.text,completed:t.completed,completedAt:t.completed_at,priority:t.priority||"medium",recurring:t.recurring||false,recurrenceType:t.recurrence_type||null,sprintId:t.sprint_id||null,position:t.position,createdAt:t.created_at})),
+    todos:       todos.filter(t=>t.project_id===p.id).map(t=>({id:t.id,text:t.text,completed:t.completed,completedAt:t.completed_at,priority:t.priority||"medium",recurring:t.recurring||false,recurrenceType:t.recurrence_type||null,sprintId:t.sprint_id||null,position:t.position,createdAt:t.created_at,nextDueAt:t.next_due_at||null})),
     sprints:     sprints.filter(sp=>sp.project_id===p.id).map(sp=>({id:sp.id,name:sp.name,goal:sp.goal,startDate:sp.start_date,endDate:sp.end_date,status:sp.status||"active",position:sp.position,createdAt:sp.created_at})),
     timeSessions:timeSess.filter(ts=>ts.project_id===p.id).map(ts=>({id:ts.id,startedAt:ts.started_at,endedAt:ts.ended_at,durationSeconds:ts.duration_seconds,note:ts.note,createdAt:ts.created_at})),
     assets:      assets.filter(a=>a.project_id===p.id).map(a=>({id:a.id,name:a.name,url:a.url,type:a.type,createdAt:a.created_at})),
@@ -1090,6 +1098,19 @@ export default function QoderApp() {
     const refresh=async()=>{
       try{
         const pjs=await loadProjects(cfg.url,cfg.key,session.access_token,session.user.id);
+        // Spawn new copies of recurring todos whose nextDueAt has passed
+        const now=new Date();
+        for(const p of pjs){
+          for(const t of (p.todos||[])){
+            if(t.completed&&t.recurring&&t.nextDueAt&&new Date(t.nextDueAt)<=now){
+              const position=(p.todos||[]).length;
+              try{
+                await sb.post(cfg.url,cfg.key,session.access_token,"todos",{project_id:p.id,text:t.text,completed:false,priority:t.priority,recurring:true,recurrence_type:t.recurrenceType,position});
+                await sb.patch(cfg.url,cfg.key,session.access_token,"todos",t.id,{next_due_at:null});
+              }catch{}
+            }
+          }
+        }
         setProjects(pjs);
         const tags=await loadUserTags(cfg.url,cfg.key,session.access_token,session.user.id);
         setUserTags(tags);
@@ -1704,12 +1725,22 @@ export default function QoderApp() {
     try{
       await sb.patch(cfg.url,cfg.key,T(),"todos",tid,{completed,completed_at:completedAt});
       mutate(pid,p=>({...p,todos:p.todos.map(t=>t.id===tid?{...t,completed,completedAt}:t)}));
-      // Auto-regenerate if recurring and just completed
+      // For recurring todos: store nextDueAt but don't regenerate immediately
+      // The background sync will create the new copy when the date arrives
       if(completed&&todo.recurring&&todo.recurrenceType){
-        const position=projects.find(p=>p.id===pid)?.todos?.length||0;
-        const row=await sb.post(cfg.url,cfg.key,T(),"todos",{project_id:pid,text:todo.text,completed:false,priority:todo.priority,recurring:true,recurrence_type:todo.recurrenceType,position});
-        mutate(pid,p=>({...p,todos:[...p.todos,{id:row.id,text:row.text,completed:false,completedAt:null,priority:row.priority||"medium",recurring:true,recurrenceType:row.recurrence_type,sprintId:null,position:row.position,createdAt:row.created_at}]}));
-        showToast(`Recurring task regenerated`,"info");
+        const nextDueAt=getNextDueDate(todo.recurrenceType);
+        if(nextDueAt){
+          await sb.patch(cfg.url,cfg.key,T(),"todos",tid,{next_due_at:nextDueAt});
+          mutate(pid,p=>({...p,todos:p.todos.map(t=>t.id===tid?{...t,nextDueAt}:t)}));
+          const rt=RECURRENCE_TYPES[todo.recurrenceType];
+          showToast(`Will recur in ${rt?.days} day${rt?.days===1?"":'s'}${nextDueAt?' ('+new Date(nextDueAt).toLocaleDateString()+')':""}`, "info");
+        } else {
+          // per-release: regenerate immediately (no calendar date)
+          const position=projects.find(p=>p.id===pid)?.todos?.length||0;
+          const row=await sb.post(cfg.url,cfg.key,T(),"todos",{project_id:pid,text:todo.text,completed:false,priority:todo.priority,recurring:true,recurrence_type:todo.recurrenceType,position});
+          mutate(pid,p=>({...p,todos:[...p.todos,{id:row.id,text:row.text,completed:false,completedAt:null,priority:row.priority||"medium",recurring:true,recurrenceType:row.recurrence_type,sprintId:null,position:row.position,createdAt:row.created_at}]}));
+          showToast("Recurring task ready for next release","info");
+        }
       }
     }catch(e){showToast(e.message,"err");}
   };
@@ -2057,6 +2088,7 @@ export default function QoderApp() {
             checklistTemplates={checklistTemplates}
             onApplyChecklist={(tid)=>applyChecklistTemplate(liveProj.id,tid)}
             onSaveAsTemplate={(name,items)=>saveChecklistTemplate(name,items)}
+            onDeleteChecklist={(id)=>deleteChecklistTemplate(id)}
             onDragTodo={(todo)=>setDraggedTodo({todo,sourcePid:liveProj.id})}
             allProjects={projects}
             onChangelog={()=>openModal("changelog",{})}
@@ -2378,7 +2410,7 @@ function ScrollableTabBar({children,isMobile}){
 }
 
 // ── ProjectView ───────────────────────────────────────────────────────────────
-function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,pomMode,setPomMode,pomSecs,setPomSecs,pomActive,setPomActive,pomSession,setPomSession,pomCycles,setPomCycles,onAddAsset,onDeleteAsset,onUploadAssetFile,onEditAsset,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onEditBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo}){
+function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,pomMode,setPomMode,pomSecs,setPomSecs,pomActive,setPomActive,pomSession,setPomSession,pomCycles,setPomCycles,onAddAsset,onDeleteAsset,onUploadAssetFile,onEditAsset,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onEditBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
@@ -2497,7 +2529,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
       {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion} onDelete={onDeleteVersion} onChangelog={onChangelog}/>}
       {tab==="milestones" &&<MilestonesTab project={project} onAdd={onAddMilestone} onToggle={onToggleMilestone} onDelete={onDeleteMilestone}/>}
       {tab==="sprints"    &&<SprintsTab    project={project} onAdd={onAddSprint} onUpdateStatus={onUpdateSprintStatus} onDelete={onDeleteSprint} onAssignTodo={onAssignTodoToSprint}/>}
-      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates||[]} onApplyChecklist={onApplyChecklist} onSaveAsTemplate={onSaveAsTemplate} onDragTodo={onDragTodo}/>}
+      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates||[]} onApplyChecklist={onApplyChecklist} onSaveAsTemplate={onSaveAsTemplate} onDragTodo={onDragTodo} onDeleteChecklist={onDeleteChecklist}/>}
       {tab==="snippets"   &&<SnippetsTab   project={project} onAdd={onAddSnippet} onEdit={onEditSnippet} onDelete={onDeleteSnippet}/>}
       {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession} pomMode={pomMode} setPomMode={setPomMode} pomSecs={pomSecs} setPomSecs={setPomSecs} pomActive={pomActive} setPomActive={setPomActive} pomSession={pomSession} setPomSession={setPomSession} pomCycles={pomCycles} setPomCycles={setPomCycles}/>}
       {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes} onPin={onPinNote}/>}
@@ -2636,7 +2668,7 @@ function MilestonesTab({project,onAdd,onToggle,onDelete}){
 }
 
 // ── Todo Tab ──────────────────────────────────────────────────────────────────
-function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSprint,allProjects,onCloneTodos,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo}){
+function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSprint,allProjects,onCloneTodos,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
   const [newText,setNewText]=useState("");
   const [newPriority,setNewPriority]=useState("medium");
   const [newRecurring,setNewRecurring]=useState(false);
@@ -2665,11 +2697,24 @@ function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSpri
       <div style={s.tabBar}>
         <span style={s.mono12}>{done.length}/{todos.length} completed</span>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-          {checklistTemplates?.length>0&&<select className="q-input" style={{width:160,marginTop:0,fontSize:11,padding:"5px 8px"}} value="" onChange={e=>{if(e.target.value)onApplyChecklist(e.target.value);}}>
-            <option value="">+ Checklist…</option>
-            {checklistTemplates.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>}
-          {done.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11,color:"#FF6B9D"}} onClick={async()=>{if(await qConfirm(`Delete all ${done.length} completed todos?`)){for(const t of done)await onDelete(t.id);}}}>Clear Done</button>}
+          {checklistTemplates?.length>0&&<div style={{display:"flex",gap:4,alignItems:"center"}}>
+            <select className="q-input" style={{width:150,marginTop:0,fontSize:11,padding:"5px 8px"}} value="" onChange={e=>{if(e.target.value)onApplyChecklist(e.target.value);}}>
+              <option value="">+ Checklist…</option>
+              {checklistTemplates.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            {onDeleteChecklist&&<div style={{position:"relative"}} className="q-checklist-del-wrap">
+              <button className="q-btn-ghost" style={{padding:"5px 8px",fontSize:11,color:"var(--txt-muted)"}} title="Manage checklists" onClick={e=>{e.currentTarget.nextSibling.style.display=e.currentTarget.nextSibling.style.display==="block"?"none":"block";}}>⚙</button>
+              <div style={{display:"none",position:"absolute",top:"100%",right:0,zIndex:200,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:8,padding:"6px 0",minWidth:180,boxShadow:"0 4px 20px rgba(0,0,0,.3)"}}>
+                {checklistTemplates.map(t=>(
+                  <div key={t.id} style={{display:"flex",alignItems:"center",padding:"6px 12px",gap:8}}>
+                    <span style={{flex:1,fontSize:12,color:"var(--txt)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.name}</span>
+                    <button onClick={async()=>{if(await qConfirm(`Delete checklist "${t.name}"?`))onDeleteChecklist(t.id);}} style={{background:"none",border:"none",cursor:"pointer",color:"#FF6B9D",fontSize:12,padding:"0 2px",flexShrink:0}}>✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>}
+          </div>}
+          {done.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11,color:"#FF6B9D"}} onClick={async()=>{if(await qConfirm(`Delete all ${done.length} completed todos?`)){const ids=done.map(t=>t.id);ids.forEach(id=>onDelete(id));}}}>Clear Done</button>}
           {pending.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={async()=>{if(await qConfirm(`Mark all ${pending.length} open todos as complete?`))pending.forEach(t=>onToggle(t.id));}}>Complete All</button>}
           {pending.length>0&&onApplyChecklist&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} title="Save open todos as reusable checklist" onClick={()=>{setTemplateName("");setShowSaveTemplate(true);}}>Save as Checklist</button>}
           {otherProjects.length>0&&<button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12}} onClick={()=>setShowClone(v=>!v)}>Clone to Project…</button>}
@@ -2745,7 +2790,7 @@ function TodoRow({todo,onToggle,onDelete,activeSprints,onAssignSprint,onDragTodo
       <div style={{flex:1}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <span style={{color:"var(--txt)",fontWeight:500,textDecoration:todo.completed?"line-through":"none",fontSize:14}}>{todo.text}</span>
-          {todo.recurring&&<span style={{fontSize:10,padding:"1px 6px",borderRadius:8,background:"rgba(0,212,255,.08)",color:"#00D4FF",fontFamily:"'JetBrains Mono'"}}>{RECURRENCE_TYPES[todo.recurrenceType]?.icon||"↺"} {RECURRENCE_TYPES[todo.recurrenceType]?.label||"Recurring"}</span>}
+          {todo.recurring&&<span style={{fontSize:10,padding:"1px 6px",borderRadius:8,background:todo.nextDueAt?"rgba(74,222,128,.08)":"rgba(0,212,255,.08)",color:todo.nextDueAt?"#4ADE80":"#00D4FF",fontFamily:"'JetBrains Mono'"}} title={todo.nextDueAt?"Next: "+new Date(todo.nextDueAt).toLocaleDateString():undefined}>{RECURRENCE_TYPES[todo.recurrenceType]?.icon||"↺"} {todo.nextDueAt?"Next: "+new Date(todo.nextDueAt).toLocaleDateString():RECURRENCE_TYPES[todo.recurrenceType]?.label||"Recurring"}</span>}
           {sprint&&<span style={{fontSize:10,padding:"1px 6px",borderRadius:8,background:"rgba(180,127,255,.1)",color:"#B47FFF",fontFamily:"'Syne'",fontWeight:600}}>{sprint.name}</span>}
         </div>
         {todo.completed&&todo.completedAt&&<p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#4ADE80",marginTop:3,opacity:.75}}>✓ {new Date(todo.completedAt).toLocaleDateString()} at {new Date(todo.completedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>}
