@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.8.2";
+const APP_VER    = "v0.8.3";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -952,8 +952,8 @@ export default function QoderApp() {
     const cleanA  = window.electronAPI.onUpdateAvailable((_,v)=>setUpdateStatus("available"));
     const cleanP  = window.electronAPI.onUpdateProgress?.((_,pct)=>{setUpdateStatus("downloading");setDownloadPct(pct||0);});
     const cleanR  = window.electronAPI.onUpdateReady((_,v)=>{console.log("[updater] ready",v);setUpdateStatus("ready");});
-    const cleanN  = window.electronAPI.onUpdateNotAvailable?.(()=>setUpdateStatus("current"));
-    const cleanE  = window.electronAPI.onUpdateError?.((_,msg)=>setUpdateStatus("error"));
+    const cleanN  = window.electronAPI.onUpdateNotAvailable?.(()=>setUpdateStatus(s=>s==="downloading"||s==="ready"?s:"current"));
+    const cleanE  = window.electronAPI.onUpdateError?.((_,msg)=>{setUpdateError(msg||"Update error");setUpdateStatus(s=>s==="downloading"||s==="ready"?s:"error");});
     const cleanM  = window.electronAPI.onMenuCheckUpdates?.(()=>handleCheckForUpdates());
     return () => { cleanA?.(); cleanP?.(); cleanR?.(); cleanN?.(); cleanE?.(); cleanM?.(); };
   }, []);
@@ -1053,7 +1053,8 @@ export default function QoderApp() {
     } else if(dueSoon.length){
       showToast(`${dueSoon.length} milestone${dueSoon.length>1?"s":""} due within 3 days`,"info");
     }
-  },[projects.map(p=>p.id).join(",")]); // only re-run when project list changes
+  // Only fire when milestone dates or completion status actually change
+  },[JSON.stringify(projects.flatMap(p=>(p.milestones||[]).filter(m=>!m.completed&&m.date).map(m=>m.id+m.date)).sort())]);
   useEffect(()=>{
     if(screen!=="app"||!cfg||!session)return;
     const refresh=async()=>{
@@ -1944,7 +1945,12 @@ export default function QoderApp() {
       <main style={s.main}>
         {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"var(--txt)"}}>oder</span></div><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div>}
 
-        {view==="dashboard"&&<Dashboard projects={filtered} allProjects={projects} isMobile={isMobile} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} userTags={userTags} tagFilter={tagFilter} setTagFilter={setTagFilter} onOpen={openProject} onNew={()=>openModal("add-project",{status:"planning",techStack:[],tagIds:[],allProjects:projects,dependsOn:[]})} onExportAll={()=>exportAllProjectsJSON(projects)} onCmdPalette={()=>setCmdPalette(true)} onWeeklySummary={()=>{const md=generateWeeklySummary(projects);const blob=new Blob([md],{type:"text/markdown"});const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=`qoder-weekly-${new Date().toISOString().slice(0,10)}.md`;a.click();URL.revokeObjectURL(u);showToast("Weekly summary downloaded");}}/>}
+        {view==="dashboard"&&<Dashboard projects={(()=>{
+              const groupedIds=groups.flatMap(g=>filtered.filter(p=>p.groupId===g.id).map(p=>p.id));
+              const ungroupedIds=filtered.filter(p=>!p.groupId&&p.status!=="archived").map(p=>p.id);
+              const archivedIds=filtered.filter(p=>p.status==="archived").map(p=>p.id);
+              return [...groupedIds,...ungroupedIds,...archivedIds].map(id=>filtered.find(p=>p.id===id)).filter(Boolean);
+            })()} allProjects={projects} isMobile={isMobile} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} userTags={userTags} tagFilter={tagFilter} setTagFilter={setTagFilter} onOpen={openProject} onNew={()=>openModal("add-project",{status:"planning",techStack:[],tagIds:[],allProjects:projects,dependsOn:[]})} onExportAll={()=>exportAllProjectsJSON(projects)} onCmdPalette={()=>setCmdPalette(true)} onWeeklySummary={()=>{const md=generateWeeklySummary(projects);const blob=new Blob([md],{type:"text/markdown"});const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=`qoder-weekly-${new Date().toISOString().slice(0,10)}.md`;a.click();URL.revokeObjectURL(u);showToast("Weekly summary downloaded");}}/>}
         {view==="project"&&liveProj&&(
           <ProjectView project={liveProj} tab={projTab} setTab={setProjTab} isMobile={isMobile} tabOrder={tabOrder}
             onAddVersion={()=>openModal("add-version",{fileLinks:[""]})}
@@ -2772,42 +2778,49 @@ function NotesTab({project,onAdd,onEdit,onDelete,onReorder,onPin}){
 }
 
 // ── Assets Tab ────────────────────────────────────────────────────────────────
+function AssetCard({asset,onEdit,onDelete,onLightbox}){
+  const isImg=(url)=>/\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(url)||(url||"").includes("/storage/v1/object/");
+  const isColor=asset.type==="Color"&&/^#[0-9a-fA-F]{3,8}$/.test(asset.url);
+  const isImage=asset.type==="Image"||asset.type==="Screenshot"||asset.type==="Icon"||asset.type==="Splash Screen";
+  const isAudio=asset.type==="Audio";
+  const isCode=asset.type==="Code";
+  return(
+    <div style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,padding:14,position:"relative"}} className="q-ver-card">
+      <div style={{position:"absolute",top:8,right:8,display:"flex",gap:4}}>
+        <button className="q-btn-ghost" style={{padding:"2px 8px",fontSize:11}} onClick={()=>onEdit&&onEdit(asset)}>Edit</button>
+        <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this asset?"))onDelete(asset.id);}}>✕</button>
+      </div>
+      <div style={{fontSize:11,color:"var(--txt-muted)",marginBottom:8,paddingRight:60,fontWeight:600}}>{asset.name}</div>
+      {isColor&&<><div style={{width:"100%",height:72,borderRadius:6,background:asset.url,marginBottom:8,boxShadow:"inset 0 0 0 1px rgba(255,255,255,.08)"}}/><div style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--txt)"}}>{asset.url}</div></>}
+      {isImg(asset.url)&&!isColor&&<img src={asset.url} alt={asset.name} onClick={()=>onLightbox(asset.url,asset.name)} style={{width:"100%",borderRadius:6,objectFit:"cover",maxHeight:160,display:"block",cursor:"pointer",marginBottom:6}} onError={e=>e.target.style.display="none"}/>}
+      {isAudio&&<audio src={asset.url} controls style={{width:"100%",marginTop:4}}/>}
+      {isCode&&<pre style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-sub)",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"var(--bg)",padding:10,borderRadius:6,maxHeight:120,overflow:"auto",margin:0}}>{asset.url}</pre>}
+      {!isColor&&!isAudio&&!isCode&&<a href={asset.url} target="_blank" rel="noreferrer" style={{...s.fileLink,display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:isImg(asset.url)?4:0}}>↗ {asset.url.length>50?asset.url.slice(0,50)+"…":asset.url}</a>}
+    </div>
+  );
+}
 function AssetsTab({project,onAdd,onDelete,onUploadFile,onEdit,onLightbox}){
   const assets=project.assets||[];
   const fileInput=useRef(null);
-  const grouped=ASSET_TYPES.reduce((acc,type)=>{const items=assets.filter(a=>a.type===type);if(items.length)acc[type]=items;return acc;},{});
-  const handleFilePick=e=>{const file=e.target.files?.[0];if(file){const type=file.type.startsWith("image/")?"Screenshot":"Document";onUploadFile(file,file.name,type);}e.target.value="";};
-  const isImg=(url)=>/\.(jpg|jpeg|png|gif|webp|svg)(\?|$)/i.test(url)||(url||"").includes("/storage/v1/object/");
+  const byType=ASSET_TYPES.reduce((acc,type)=>{const items=assets.filter(a=>a.type===type);if(items.length)acc[type]=items;return acc;},{});
+  const handleFilePick=e=>{const file=e.target.files?.[0];if(file){const type=file.type.startsWith("image/")?"Image":file.type.startsWith("audio/")?"Audio":"Document";onUploadFile(file,file.name,type);}e.target.value="";};
   return(
     <div>
       <div style={s.tabBar}>
         <span style={s.mono12}>{assets.length} {assets.length===1?"asset":"assets"}</span>
         <div style={{display:"flex",gap:8}}>
           <button className="q-btn-ghost" style={{fontSize:12,padding:"7px 12px"}} onClick={()=>fileInput.current?.click()}>Upload File</button>
-          <button className="q-btn-primary" onClick={onAdd}>+ Add Link</button>
+          <button className="q-btn-primary" onClick={onAdd}>+ Add Asset</button>
         </div>
       </div>
       <input ref={fileInput} type="file" accept="image/*,audio/*" style={{display:"none"}} onChange={handleFilePick}/>
-      {assets.length===0?<div style={s.empty}><p>No assets yet.</p></div>:(
-        <div style={{display:"flex",flexDirection:"column",gap:20}}>
-          {Object.entries(grouped).map(([type,items])=>(
+      {assets.length===0?<div style={s.empty}><p>No assets yet. Add links, images, colors, code snippets…</p></div>:(
+        <div style={{display:"flex",flexDirection:"column",gap:24}}>
+          {Object.entries(byType).map(([type,items])=>(
             <div key={type}>
-              <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>{ASSET_ICONS[type]||"📎"} {type}</div>
-              <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                {items.map(asset=>(
-                  <div key={asset.id} className="q-ms-row">
-                    {isImg(asset.url)&&<img src={asset.url} alt={asset.name} onClick={()=>onLightbox(asset.url,asset.name)} style={{width:48,height:48,objectFit:"cover",borderRadius:6,cursor:"pointer",flexShrink:0,border:"1px solid var(--border)"}}/>}
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{color:"var(--txt)",fontWeight:500,fontSize:14}}>{asset.name}</div>
-                      {asset.type==="Color"&&/^#[0-9a-fA-F]{3,8}$/.test(asset.url)?
-                        <div style={{width:48,height:32,borderRadius:6,background:asset.url,border:"1px solid var(--border)",marginTop:4,flexShrink:0}} title={asset.url}/>:
-                        <a href={asset.url} target="_blank" rel="noreferrer" style={{...s.fileLink,marginTop:4,display:"inline-block",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>↗ {asset.url.length>60?asset.url.slice(0,60)+"…":asset.url}</a>
-                      }
-                    </div>
-                    <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit&&onEdit(asset)}>Edit</button>
-                    <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this asset?"))onDelete(asset.id);}}>✕</button>
-                  </div>
-                ))}
+              <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>{ASSET_ICONS[type]||"📎"} {type}</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>
+                {items.map(asset=><AssetCard key={asset.id} asset={asset} onEdit={onEdit} onDelete={onDelete} onLightbox={onLightbox}/>)}
               </div>
             </div>
           ))}
