@@ -10,9 +10,10 @@ let autoUpdater = null;
 if (!isDev) {
   try {
     ({ autoUpdater } = require('electron-updater'));
-    autoUpdater.autoDownload = true;
+    // Do NOT autoDownload — we trigger it manually so we can track progress
+    autoUpdater.autoDownload         = false;
     autoUpdater.autoInstallOnAppQuit = true;
-    // No electron-log dependency needed — console logging is fine
+    autoUpdater.allowDowngrade       = false;
     autoUpdater.logger = {
       info:  (...a) => console.log('[updater]', ...a),
       warn:  (...a) => console.warn('[updater]', ...a),
@@ -51,35 +52,42 @@ ipcMain.handle('open-html-in-browser', async (_, html) => {
   }
 });
 
+// Check only — returns {status, version?} without starting download
 ipcMain.handle('check-for-updates', async () => {
-  if (!autoUpdater) {
-    return { status: 'error', message: 'Auto-updater not available. This is a dev build.' };
-  }
+  if (!autoUpdater) return { status: 'error', message: 'Dev build — updater disabled.' };
   try {
     const result = await autoUpdater.checkForUpdates();
-    const latestVersion  = result?.updateInfo?.version;
-    const currentVersion = app.getVersion();
-    if (latestVersion && latestVersion !== currentVersion) {
-      return { status: 'available', version: latestVersion };
-    }
-    return { status: 'not-available', version: currentVersion };
+    const latest  = result?.updateInfo?.version;
+    const current = app.getVersion();
+    if (latest && latest !== current) return { status: 'available', version: latest };
+    return { status: 'not-available', version: current };
   } catch (err) {
     let msg = String(err.message || err);
-    // Trim verbose HTTP error dumps to one clean line
     if (msg.includes('404') || msg.includes('HttpError'))
-      msg = 'No releases found on GitHub. Publish a release first with: npm run electron:win';
+      msg = 'No releases found on GitHub. Run npm run electron:win to publish.';
     else if (msg.includes('ENOTFOUND') || msg.includes('EAI_AGAIN'))
-      msg = 'No internet connection. Try again when connected.';
-    else if (msg.includes('401') || msg.includes('403') || msg.includes('token'))
-      msg = 'GitHub access denied. Check that the repo is public.';
+      msg = 'No internet connection.';
+    else if (msg.includes('401') || msg.includes('403'))
+      msg = 'GitHub access denied. Make sure the repo is public.';
     else
       msg = msg.split('\n')[0].slice(0, 120);
     return { status: 'error', message: msg };
   }
 });
 
+// Explicitly start the download — called when user clicks "Download"
+ipcMain.handle('start-download', async () => {
+  if (!autoUpdater) return;
+  try {
+    await autoUpdater.downloadUpdate();
+  } catch (err) {
+    mainWindow?.webContents.send('update-error', err.message?.split('\n')[0]?.slice(0, 120));
+  }
+});
+
 ipcMain.handle('install-update', () => {
-  autoUpdater?.quitAndInstall();
+  // isSilent=true, isForceRunAfter=true — quit and relaunch immediately
+  autoUpdater?.quitAndInstall(true, true);
 });
 
 ipcMain.handle('set-titlebar-overlay', (_, opts) => {
@@ -126,14 +134,24 @@ function createWindow() {
 
   // Wire updater events → renderer
   if (autoUpdater) {
-    autoUpdater.on('update-available',     info => mainWindow?.webContents.send('update-available',     info.version));
-    autoUpdater.on('download-progress',    ()   => mainWindow?.webContents.send('update-progress'));
-    autoUpdater.on('update-downloaded',    info => mainWindow?.webContents.send('update-ready',         info.version));
-    autoUpdater.on('update-not-available', ()   => mainWindow?.webContents.send('update-not-available'));
-    autoUpdater.on('error',                err  => {
-      console.error('updater error:', err.message);
-      mainWindow?.webContents.send('update-error', err.message?.split('\n')[0]?.slice(0,120));
+    autoUpdater.on('update-available', info => {
+      mainWindow?.webContents.send('update-available', info.version);
     });
+    autoUpdater.on('download-progress', progressObj => {
+      // Send real percentage so the UI can show a progress bar
+      mainWindow?.webContents.send('update-progress', Math.round(progressObj.percent || 0));
+    });
+    autoUpdater.on('update-downloaded', info => {
+      mainWindow?.webContents.send('update-ready', info.version);
+    });
+    autoUpdater.on('update-not-available', () => {
+      mainWindow?.webContents.send('update-not-available');
+    });
+    autoUpdater.on('error', err => {
+      console.error('updater error:', err.message);
+      mainWindow?.webContents.send('update-error', err.message?.split('\n')[0]?.slice(0, 120));
+    });
+    // Check on startup — just check, don't download yet
     setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch {} }, 10000);
   }
 }

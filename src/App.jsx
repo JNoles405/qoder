@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.7.8";
+const APP_VER    = "v0.8.1";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -326,7 +326,7 @@ async function loadProjects(url,key,token,userId){
   return rows.map(p=>({
     id:p.id,name:p.name,description:p.description,status:p.status,
     techStack:p.tech_stack||[],localFolder:p.local_folder||null,
-    gitUrl:p.git_url||"",supabaseUrl:p.supabase_url||"",vercelUrl:p.vercel_url||"",groupId:p.group_id||null,dependsOn:p.depends_on||[],
+    gitUrl:p.git_url||"",supabaseUrl:p.supabase_url||"",vercelUrl:p.vercel_url||"",groupId:p.group_id||null,dependsOn:p.depends_on||[],tabOrderOverride:p.tab_order_override||null,
     isPublic:p.is_public||false,publicSlug:p.public_slug||null,
     color:p.color||null,
     position:p.position,createdAt:p.created_at,
@@ -444,6 +444,31 @@ function getProjectHealth(project){
   const label=score>=80?"Healthy":score>=50?"Fair":score>=25?"At Risk":"Critical";
   const color=score>=80?"#4ADE80":score>=50?"#FFB347":score>=25?"#FF6B9D":"#FF4466";
   return{score,label,color,issues};
+}
+
+// ── Issues CSV export ────────────────────────────────────────────────────────
+function exportIssuesCSV(project){
+  const rows=[["Title","Priority","Status","Description","Fixed In","Fixed At","Created"]];
+  (project.issues||[]).forEach(i=>{
+    const ver=i.fixedInVersionId?(project.versions||[]).find(v=>v.id===i.fixedInVersionId)?.version||"":"";
+    rows.push([`"${i.title}"`,i.priority,i.status,`"${(i.description||"").replace(/"/g,"'")}"`,ver,i.fixedAt?new Date(i.fixedAt).toLocaleDateString():"",new Date(i.createdAt).toLocaleDateString()]);
+  });
+  const csv=rows.map(r=>r.join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv"});
+  const u=URL.createObjectURL(blob);const a=document.createElement("a");
+  a.href=u;a.download=`${project.name}-issues-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(u);
+}
+
+// ── Milestones CSV export ─────────────────────────────────────────────────────
+function exportMilestonesCSV(project){
+  const rows=[["Title","Status","Due Date","Completed At","Description"]];
+  (project.milestones||[]).forEach(m=>{
+    rows.push([`"${m.title}"`,m.completed?"Complete":"Open",m.date?new Date(m.date).toLocaleDateString():"",m.completedAt?new Date(m.completedAt).toLocaleDateString():"",`"${(m.description||"").replace(/"/g,"'")}"`]);
+  });
+  const csv=rows.map(r=>r.join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv"});
+  const u=URL.createObjectURL(blob);const a=document.createElement("a");
+  a.href=u;a.download=`${project.name}-milestones-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(u);
 }
 
 // ── Time report CSV export ───────────────────────────────────────────────────
@@ -779,6 +804,7 @@ export default function QoderApp() {
   const [sidebarCollapsed,setSidebarCollapsed]= useState(()=>{ try{return localStorage.getItem("q-sidebar-c")==="1";}catch{return false;} });
   const [updateStatus,    setUpdateStatus]    = useState(null); // null | "available" | "downloading" | "ready" | "current" | "error"
   const [updateError,     setUpdateError]     = useState("");
+  const [downloadPct,     setDownloadPct]     = useState(0);
   const [cmdPalette,      setCmdPalette]      = useState(false);
   const [draggedTodo,     setDraggedTodo]     = useState(null); // {todo, sourcePid}
   const [dragOverPid,     setDragOverPid]     = useState(null);
@@ -872,7 +898,7 @@ export default function QoderApp() {
     try {
       const result = await window.electronAPI?.checkForUpdates?.();
       if (!result) { setUpdateStatus(null); return; }
-      if (result.status === "available")     { setUpdateStatus("available");  showToast(`Update v${result.version} downloading…`, "info"); }
+      if (result.status === "available")     { setUpdateStatus("available");  showToast(`Update v${result.version} available`, "info"); }
       else if (result.status === "not-available") { setUpdateStatus("current"); setTimeout(()=>setUpdateStatus(s=>s==="current"?null:s), 4000); }
       else if (result.status === "error")    { setUpdateError(result.message||"Update check failed"); setUpdateStatus("error"); setTimeout(()=>setUpdateStatus(null),8000); }
     } catch(e) {
@@ -916,7 +942,7 @@ export default function QoderApp() {
   useEffect(() => {
     if (!window.electronAPI?.onUpdateAvailable) return;
     const cleanA  = window.electronAPI.onUpdateAvailable((_,v)=>setUpdateStatus("available"));
-    const cleanP  = window.electronAPI.onUpdateProgress?.(()=>setUpdateStatus("downloading")); // progress events keep status as downloading
+    const cleanP  = window.electronAPI.onUpdateProgress?.((_,pct)=>{setUpdateStatus("downloading");setDownloadPct(pct||0);});
     const cleanR  = window.electronAPI.onUpdateReady((_,v)=>{console.log("[updater] ready",v);setUpdateStatus("ready");});
     const cleanN  = window.electronAPI.onUpdateNotAvailable?.(()=>setUpdateStatus("current"));
     const cleanE  = window.electronAPI.onUpdateError?.((_,msg)=>setUpdateStatus("error"));
@@ -972,6 +998,13 @@ export default function QoderApp() {
     return[...existing,...added];
   };
 
+  const saveProjectTabOrder=async(pid,order)=>{
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"projects",pid,{tab_order_override:order});
+      mutate(pid,p=>({...p,tabOrderOverride:order}));
+      showToast("Tab order saved for this project");
+    }catch(e){showToast(e.message,"err");}
+  };
   const saveTabOrderSync=async(order)=>{
     setTabOrder(order);
     if(!session||!cfg)return;
@@ -1746,19 +1779,29 @@ export default function QoderApp() {
               <div style={{height:3,background:"var(--accent)",borderRadius:0,animation:"qoder-progress 2s ease-in-out infinite",width:"60%"}}/>
             </div>
           )}
-          {updateStatus==="ready"&&<div style={{height:3,background:"#4ADE80",width:"100%"}}/>}
-          <div style={{padding:"10px 20px",display:"flex",alignItems:"center",gap:12}}>
+          {(updateStatus==="downloading"||updateStatus==="ready")&&(
+            <div style={{height:4,background:"var(--border)",width:"100%",position:"relative"}}>
+              <div style={{height:4,background:updateStatus==="ready"?"#4ADE80":"var(--accent)",width:updateStatus==="ready"?"100%":`${downloadPct}%`,transition:"width .4s ease",borderRadius:0}}/>
+            </div>
+          )}
+          <div style={{padding:"10px 20px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
             {updateStatus==="ready"?(
               <>
-                <span style={{color:"#4ADE80",fontFamily:"'Syne'",fontWeight:700,fontSize:14}}>✓ Update ready to install</span>
+                <span style={{color:"#4ADE80",fontFamily:"'Syne'",fontWeight:700,fontSize:14}}>✓ Update ready — {downloadPct}% downloaded</span>
                 <button className="q-btn-primary" style={{padding:"6px 16px",fontSize:13,background:"#4ADE80",color:"#06090F"}} onClick={()=>window.electronAPI?.installUpdate?.()}>Restart & Update</button>
                 <button className="q-btn-ghost" style={{padding:"6px 12px",fontSize:12}} onClick={()=>setUpdateStatus(null)}>Later</button>
               </>
+            ):updateStatus==="available"?(
+              <>
+                <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:13}}>↓ Update available</span>
+                <button className="q-btn-primary" style={{padding:"6px 14px",fontSize:12}} onClick={()=>{setUpdateStatus("downloading");setDownloadPct(0);window.electronAPI?.startDownload?.();}}>Download Now</button>
+                <a href="https://github.com/JNoles405/qoder/releases/latest" target="_blank" rel="noreferrer" style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-muted)"}}>or download manually</a>
+                <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12,marginLeft:"auto"}} onClick={()=>setUpdateStatus(null)}>Later</button>
+              </>
             ):(
               <>
-                <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:13}}>↓ Downloading update…</span>
-                <span style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-muted)"}}>This may take a few minutes. If it stalls,</span>
-                <a href="https://github.com/JNoles405/qoder/releases/latest" target="_blank" rel="noreferrer" style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--accent)"}}>download manually</a>
+                <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:13}}>↓ Downloading… {downloadPct}%</span>
+                <span style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-muted)"}}>{downloadPct<10?"Starting…":downloadPct<99?"In progress…":"Finalizing…"}</span>
                 <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12,marginLeft:"auto"}} onClick={()=>setUpdateStatus(null)}>Hide</button>
               </>
             )}
@@ -1807,34 +1850,54 @@ export default function QoderApp() {
                   <div style={s.navSection}>Projects</div>
                   <button onClick={()=>openModal("add-group",{})} title="New group" style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:14,padding:"14px 12px 5px",lineHeight:1}}>+⊟</button>
                 </div>
-                {/* Grouped projects — draggable group order + draggable projects within group */}
+                {/* Grouped projects — group headings draggable for reorder, projects draggable within group */}
                 {(()=>{
-                  let dragG=null;
-                  const onDragStartG=i=>{dragG=i;};
-                  const onDragOverG=(e,i)=>{e.preventDefault();if(dragG===null||dragG===i)return;const n=[...grouped];const[m]=n.splice(dragG,1);n.splice(i,0,m);reorderGroups(n.map(g=>({...g})));dragG=i;};
                   return grouped.map((g,gi)=>(
                     <div key={g.id}
                       style={{marginTop:gi>0?6:0,paddingTop:gi>0?6:0,borderTop:gi>0?"1px solid var(--border-lg)":"none"}}>
-                      {/* Group heading — draggable for reorder, droppable for project assignment */}
-                      <div draggable onDragStart={()=>onDragStartG(gi)} onDragOver={e=>{onDragOverG(e,gi);e.currentTarget.style.background="var(--accent-dim)";}} onDragEnd={()=>{dragG=null;}} onDragLeave={e=>e.currentTarget.style.background=""} onDrop={e=>{e.currentTarget.style.background="";const pid=e.dataTransfer.getData("projectId");if(pid)assignProjectToGroup(pid,g.id);}}
-                        style={{display:"flex",alignItems:"center",padding:"4px 12px 4px 10px",gap:6,cursor:"grab",borderLeft:g.color?`2px solid ${g.color}40`:"2px solid transparent",marginLeft:6,borderRadius:"0 4px 4px 0",transition:"background .1s"}}>
-                        <span style={{color:"var(--txt-dim)",fontSize:11,userSelect:"none",flexShrink:0}}>⠿</span>
+                      {/* Group heading — drop zone for assigning projects to this group */}
+                      <div
+                        onDragOver={e=>e.preventDefault()}
+                        onDrop={e=>{const pid=e.dataTransfer.getData("projectId");if(pid){e.preventDefault();e.stopPropagation();assignProjectToGroup(pid,g.id);}}}
+                        style={{display:"flex",alignItems:"center",padding:"4px 12px 4px 10px",gap:6,
+                          borderLeft:g.color?`2px solid ${g.color}40`:"2px solid transparent",
+                          marginLeft:6,borderRadius:"0 4px 4px 0"}}>
                         {g.color&&<span style={{width:6,height:6,borderRadius:"50%",background:g.color,flexShrink:0}}/>}
                         <span style={{fontSize:10,fontWeight:700,letterSpacing:"1.2px",color:g.color||"var(--txt-faint)",textTransform:"uppercase",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",opacity:g.color?0.85:1}}>{g.name}</span>
                         <button onClick={async e=>{e.stopPropagation();if(await qConfirm(`Delete group "${g.name}"? Projects will be ungrouped.`))deleteGroup(g.id);}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:11,padding:"0 2px",lineHeight:1}} className="q-group-del">✕</button>
                       </div>
-                      {/* Projects within group — individually draggable */}
-                      <DraggableSidebarList items={g.items} onReorder={reordered=>{const allActive=active.filter(p=>p.groupId!==g.id);setProjects([...allActive,...reordered,...archived]);reordered.forEach((p,i)=>sb.patch(cfg.url,cfg.key,T(),"projects",p.id,{position:i}).catch(()=>{}));}}>
-                        {p=><div draggable onDragStart={e=>{e.dataTransfer.setData("projectId",p.id);e.stopPropagation();}} onDragOver={e=>{if(draggedTodo)e.preventDefault();setDragOverPid(p.id);}} onDragLeave={()=>setDragOverPid(null)} onDrop={()=>handleTodoDrop(p.id)} style={{borderRadius:7,outline:draggedTodo&&dragOverPid===p.id?"2px dashed var(--accent)":"2px dashed transparent",transition:"outline .1s"}}><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/></div>}
+                      {/* Projects within group — use DraggableSidebarList for reordering */}
+                      <DraggableSidebarList
+                        items={g.items}
+                        onReorder={reordered=>{
+                          const others=active.filter(p=>p.groupId!==g.id);
+                          setProjects(prev=>[...prev.filter(p=>p.status==="archived"||p.groupId!==g.id||others.find(x=>x.id===p.id)),...reordered,...prev.filter(p=>p.status==="archived")]);
+                          reordered.forEach((p,i)=>sb.patch(cfg.url,cfg.key,T(),"projects",p.id,{position:i}).catch(()=>{}));
+                        }}>
+                        {p=>{
+  const today=new Date();today.setHours(0,0,0,0);
+  const badge=(p.milestones||[]).filter(m=>!m.completed&&m.date&&new Date(m.date)<today).length+(p.issues||[]).filter(i=>i.status==="open"&&i.priority==="critical").length;
+  return<div onDragOver={e=>{if(draggedTodo){e.preventDefault();setDragOverPid(p.id);}}} onDragLeave={()=>setDragOverPid(null)} onDrop={e=>{if(draggedTodo)handleTodoDrop(p.id);}} style={{position:"relative",borderRadius:7,outline:draggedTodo&&dragOverPid===p.id?"2px dashed var(--accent)":"2px dashed transparent",transition:"outline .1s"}}>
+    <NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/>
+    {badge>0&&<span style={{position:"absolute",top:4,right:6,minWidth:14,height:14,borderRadius:7,background:"#FF4466",color:"#fff",fontSize:9,fontFamily:"'JetBrains Mono'",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 3px",pointerEvents:"none"}}>{badge>9?"9+":badge}</span>}
+  </div>;}}
                       </DraggableSidebarList>
                     </div>
                   ));
                 })()}
                 {/* Ungrouped projects */}
                 {ungrouped.length>0&&<>
-                  {grouped.some(g=>g.items.length>0)&&<div onDragOver={e=>e.preventDefault()} onDrop={e=>{const pid=e.dataTransfer.getData("projectId");if(pid)assignProjectToGroup(pid,null);}} style={{...s.navSection,marginTop:4,opacity:.5,cursor:"default"}} title="Drop here to ungroup">Other</div>}
+                  {grouped.some(g=>g.items.length>0)&&<div onDragOver={e=>e.preventDefault()} onDrop={e=>{const pid=e.dataTransfer.getData("projectId");if(pid)assignProjectToGroup(pid,null);}} style={{...s.navSection,marginTop:4,opacity:.5}} title="Drop here to ungroup">Other</div>}
                   <DraggableSidebarList items={ungrouped} onReorder={reorderProjects}>
-                    {p=><div draggable onDragStart={e=>e.dataTransfer.setData("projectId",p.id)} onDragOver={e=>{if(draggedTodo)e.preventDefault();setDragOverPid(p.id);}} onDragLeave={()=>setDragOverPid(null)} onDrop={()=>handleTodoDrop(p.id)} style={{borderRadius:7,outline:draggedTodo&&dragOverPid===p.id?"2px dashed var(--accent)":"2px dashed transparent",transition:"outline .1s"}}><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/></div>}
+                    {p=>{
+  const today=new Date();today.setHours(0,0,0,0);
+  const overdue=(p.milestones||[]).filter(m=>!m.completed&&m.date&&new Date(m.date)<today).length;
+  const critical=(p.issues||[]).filter(i=>i.status==="open"&&i.priority==="critical").length;
+  const badge=overdue+critical;
+  return<div onDragOver={e=>{if(draggedTodo){e.preventDefault();setDragOverPid(p.id);}}} onDragLeave={()=>setDragOverPid(null)} onDrop={()=>{if(draggedTodo)handleTodoDrop(p.id);}} style={{position:"relative",borderRadius:7,outline:draggedTodo&&dragOverPid===p.id?"2px dashed var(--accent)":"2px dashed transparent",transition:"outline .1s"}}>
+    <NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/>
+    {badge>0&&<span style={{position:"absolute",top:4,right:6,minWidth:14,height:14,borderRadius:7,background:"#FF4466",color:"#fff",fontSize:9,fontFamily:"'JetBrains Mono'",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 3px",pointerEvents:"none"}}>{badge>9?"9+":badge}</span>}
+  </div>;}}
                   </DraggableSidebarList>
                 </>}
                 {archived.length>0&&<>
@@ -1991,7 +2054,7 @@ export default function QoderApp() {
         {modal==="add-concept"  &&<ConceptForm   data={form} setData={setForm} cfg={cfg} session={session} projectId={selProj?.id} onSubmit={d=>{addConcept(selProj.id,d);closeModal();}} onUploadFile={(file,label,type)=>{uploadConceptFile(selProj.id,file,label,type);closeModal();}} onCancel={closeModal}/>}
         {modal==="save-template" &&<SaveTemplateModal data={form} setData={setForm} onSubmit={d=>{saveTemplate(selProj.id,d.name);closeModal();}} onCancel={closeModal}/>}
         {modal==="manage-templates"&&<ManageTemplatesModal templates={templates} onDelete={deleteTemplate} onApply={tid=>{if(selProj){applyTemplate(selProj.id,tid);}closeModal();}} onCancel={closeModal}/>}
-        {modal==="settings"     &&<SettingsModal tabOrder={tabOrder} userTags={userTags} templates={templates} updateStatus={updateStatus} updateError={updateError} theme={theme} accentColor={accentColor} customStatuses={customStatuses} onCheckForUpdates={handleCheckForUpdates} onSave={order=>saveTabOrderSync(order)} onSavePreferences={prefs=>{savePreferences(prefs);closeModal();}} onAddTag={addTag} onDeleteTag={deleteTag} onOpenTemplates={()=>openModal("manage-templates",{})} onCancel={closeModal}/>}
+        {modal==="settings"     &&<SettingsModal tabOrder={tabOrder} userTags={userTags} templates={templates} updateStatus={updateStatus} updateError={updateError} theme={theme} accentColor={accentColor} customStatuses={customStatuses} onCheckForUpdates={handleCheckForUpdates} onSave={order=>saveTabOrderSync(order)} onSavePreferences={prefs=>{savePreferences(prefs);closeModal();}} onAddTag={addTag} onDeleteTag={deleteTag} onOpenTemplates={()=>openModal("manage-templates",{})} onCancel={closeModal} currentProject={view==="project"?selProj:null} onSaveProjectTabOrder={(pid,order)=>saveProjectTabOrder(pid,order)}/>}
       </ModalWrap>}
     </div>
   );
@@ -2051,12 +2114,19 @@ function NavBtn({active,onClick,icon,label,small,folder,projectColor}){
 
 // ── DraggableSidebarList ──────────────────────────────────────────────────────
 function DraggableSidebarList({items,onReorder,children}){
-  const [list,setList]=useState(items);const[dragIdx,setDragIdx]=useState(null);
-  useEffect(()=>setList(items),[items]);
-  const onDragStart=i=>setDragIdx(i);
-  const onDragOver=(e,i)=>{e.preventDefault();if(dragIdx===null||dragIdx===i)return;const n=[...list];const[m]=n.splice(dragIdx,1);n.splice(i,0,m);setList(n);setDragIdx(i);};
-  const onDrop=()=>{onReorder(list);setDragIdx(null);};
-  return<>{list.map((item,i)=><div key={item.id} draggable onDragStart={()=>onDragStart(i)} onDragOver={e=>onDragOver(e,i)} onDrop={onDrop} onDragEnd={onDrop} style={{opacity:dragIdx===i?.35:1,transition:"opacity .1s",cursor:"grab"}}>{children(item,i)}</div>)}</>;
+  const [list,setList]=useState(items);
+  const [dragIdx,setDragIdx]=useState(null);
+  const dragItem=useRef(null);
+  useEffect(()=>setList(items),[JSON.stringify(items.map(i=>i.id))]);
+  const onDragStart=(e,i)=>{setDragIdx(i);dragItem.current=list[i];e.dataTransfer.setData("projectId",list[i].id);e.dataTransfer.effectAllowed="move";};
+  const onDragOver=(e,i)=>{e.preventDefault();e.stopPropagation();if(dragItem.current===null||dragIdx===i)return;const n=[...list];const from=n.findIndex(x=>x.id===dragItem.current.id);if(from===-1)return;const[m]=n.splice(from,1);n.splice(i,0,m);setList(n);setDragIdx(i);};
+  const onDrop=(e)=>{e.stopPropagation();onReorder(list);setDragIdx(null);dragItem.current=null;};
+  const onDragEnd=()=>{setDragIdx(null);dragItem.current=null;};
+  return<>{list.map((item,i)=>(
+    <div key={item.id} draggable onDragStart={e=>onDragStart(e,i)} onDragOver={e=>onDragOver(e,i)} onDrop={onDrop} onDragEnd={onDragEnd} style={{opacity:dragIdx===i?.4:1,transition:"opacity .1s"}}>
+      {children(item,i)}
+    </div>
+  ))}</>;
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -2248,6 +2318,8 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
+  const [projSearch,setProjSearch]=useState("");
+  const [showProjSearch,setShowProjSearch]=useState(false);
   const tabCounts={
     overview:null,
     versions:project.versions?.length||0,
@@ -2304,6 +2376,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
           {!isMobile&&<>
             <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportPDF}>PDF</button>
             <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportTimeReport}>Time CSV</button>
+            <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={()=>setShowProjSearch(v=>!v)}>🔍</button>
             <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onDuplicate}>Duplicate</button>
             <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportJSON}>Export JSON</button>
             <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={onExportReadme} title="Download README.md">README</button>
@@ -2322,12 +2395,40 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
         </div>
       </div>
       <ScrollableTabBar isMobile={isMobile}>
-        {tabOrder.map(t=>(
+        {(project.tabOrderOverride||tabOrder).map(t=>(
           <button key={t.key} className={`q-tab${tab===t.key?" q-tab-on":""}`} style={{padding:isMobile?"8px 11px":"10px 18px",fontSize:isMobile?12:13}} onClick={()=>setTab(t.key)}>
             {t.label}{tabCounts[t.key]>0&&<span style={s.tabPill}>{tabCounts[t.key]}</span>}
           </button>
         ))}
       </ScrollableTabBar>
+      {/* Per-project search */}
+      {showProjSearch&&<div style={{marginBottom:16,padding:"10px 14px",background:"var(--bg-input)",border:"1px solid var(--accent)",borderRadius:10}}>
+        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+          <span style={{color:"var(--accent-text)",fontFamily:"'Syne'",fontWeight:700,fontSize:13}}>🔍 Search — {project.name}</span>
+          <button className="q-del" style={{marginLeft:"auto"}} onClick={()=>{setProjSearch("");setShowProjSearch(false);}}>✕</button>
+        </div>
+        <QInput className="q-input" autoFocus style={{marginTop:0,marginBottom:8}} placeholder="Search notes, todos, issues, snippets…" value={projSearch} onChange={e=>setProjSearch(e.target.value)}/>
+        {projSearch.trim().length>=2&&(()=>{
+          const q=projSearch.toLowerCase();
+          const results=[];
+          (project.notes||[]).forEach(n=>{if(n.content?.toLowerCase().includes(q))results.push({tab:"notes",label:"Note",icon:"📝",excerpt:n.content.slice(0,80)});});
+          (project.todos||[]).forEach(t=>{if(t.text?.toLowerCase().includes(q))results.push({tab:"todos",label:"To-Do",icon:"✓",excerpt:t.text});});
+          (project.issues||[]).forEach(i=>{if(i.title?.toLowerCase().includes(q))results.push({tab:"issues",label:"Issue",icon:"🐛",excerpt:i.title});});
+          (project.versions||[]).forEach(v=>{if(v.version?.toLowerCase().includes(q)||v.releaseNotes?.toLowerCase().includes(q))results.push({tab:"versions",label:"Version",icon:"📦",excerpt:v.version});});
+          (project.snippets||[]).forEach(s=>{if(s.title?.toLowerCase().includes(q)||s.content?.toLowerCase().includes(q))results.push({tab:"snippets",label:"Snippet",icon:"💻",excerpt:s.title});});
+          (project.milestones||[]).forEach(m=>{if(m.title?.toLowerCase().includes(q))results.push({tab:"milestones",label:"Milestone",icon:"🎯",excerpt:m.title});});
+          (project.ideas||[]).forEach(d=>{if(d.content?.toLowerCase().includes(q))results.push({tab:"ideas",label:"Idea",icon:"💡",excerpt:d.content.slice(0,80)});});
+          if(!results.length)return(<p style={{...s.mono10,color:"var(--txt-faint)",padding:"4px 0"}}>No results in this project</p>);
+          return(<div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:240,overflowY:"auto"}}>{results.slice(0,20).map((r,i)=>(
+            <div key={i} onClick={()=>{setTab(r.tab);setProjSearch("");setShowProjSearch(false);}} style={{display:"flex",gap:10,padding:"8px 10px",borderRadius:7,cursor:"pointer",background:"var(--bg-card)",border:"1px solid var(--border)",alignItems:"center"}} className="q-card">
+              <span style={{fontSize:12,flexShrink:0}}>{r.icon}</span>
+              <span style={{fontFamily:"'JetBrains Mono'",fontSize:9,color:"var(--accent-text)",textTransform:"uppercase",flexShrink:0}}>{r.label}</span>
+              <span style={{fontSize:12,color:"var(--txt)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.excerpt}</span>
+              <span style={{...s.mono10,color:"var(--txt-faint)",flexShrink:0}}>{r.tab} →</span>
+            </div>
+          ))}</div>);
+        })()}
+      </div>}
       {tab==="overview"   &&<OverviewTab   project={project} latestVer={latVer}/>}
       {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion} onDelete={onDeleteVersion} onChangelog={onChangelog}/>}
       {tab==="milestones" &&<MilestonesTab project={project} onAdd={onAddMilestone} onToggle={onToggleMilestone} onDelete={onDeleteMilestone}/>}
@@ -2453,7 +2554,7 @@ function MilestonesTab({project,onAdd,onToggle,onDelete}){
   const all=[...sorted.filter(m=>!m.completed),...sorted.filter(m=>m.completed)];
   return(
     <div>
-      <div style={s.tabBar}><span style={s.mono12}>{all.filter(m=>m.completed).length}/{all.length} completed</span><button className="q-btn-primary" onClick={onAdd}>+ Add Milestone</button></div>
+      <div style={s.tabBar}><span style={s.mono12}>{all.filter(m=>m.completed).length}/{all.length} completed</span><div style={{display:"flex",gap:8}}><button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={()=>exportMilestonesCSV(project)}>Export CSV</button><button className="q-btn-primary" onClick={onAdd}>+ Add Milestone</button></div></div>
       {all.length===0?<div style={s.empty}><p>No milestones yet.</p></div>:(
         <div style={{display:"flex",flexDirection:"column",gap:3}}>
           {all.map(m=>(
@@ -2618,6 +2719,7 @@ function NotesTab({project,onAdd,onEdit,onDelete,onReorder,onPin}){
         </div>
         <div style={{display:"flex",gap:4,flexShrink:0}}>
           <button title={note.pinned?"Unpin":"Pin note"} onClick={()=>onPin&&onPin(note.id)} style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",display:"flex",alignItems:"center"}}><PinIcon size={14} active={note.pinned}/></button>
+          <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>{const blob=new Blob([note.content],{type:"text/markdown"});const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=`note-${new Date(note.createdAt).toISOString().slice(0,10)}.md`;a.click();URL.revokeObjectURL(u);}} title="Export as Markdown">↓ md</button>
           <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit(note)}>Edit</button>
           <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this note?"))onDelete(note.id);}}>✕</button>
         </div>
@@ -2724,6 +2826,7 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
           <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid var(--border-md)"}}>
             {["list","kanban"].map(m=><button key={m} onClick={()=>setViewMode(m)} style={{padding:"5px 12px",fontSize:11,background:viewMode===m?"var(--accent-dim)":"transparent",color:viewMode===m?"var(--accent-text)":"var(--txt-muted)",border:"none",cursor:"pointer",fontFamily:"'Syne'",fontWeight:600,textTransform:"capitalize"}}>{m==="list"?"≡ List":"⊞ Board"}</button>)}
           </div>
+          <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={()=>exportIssuesCSV(project)}>Export CSV</button>
           <button className="q-btn-primary" onClick={onAdd}>+ Log Issue</button>
         </div>
       </div>
@@ -3392,7 +3495,7 @@ function DraggableList({items,onReorder,children}){
 }
 
 // ── Settings Modal ────────────────────────────────────────────────────────────
-function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,templates,onDeleteTemplate,onOpenTemplates,onCheckForUpdates,updateStatus,updateError,theme,accentColor,customStatuses,onSavePreferences}){
+function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,templates,onDeleteTemplate,onOpenTemplates,onCheckForUpdates,updateStatus,updateError,theme,accentColor,customStatuses,onSavePreferences,currentProject,onSaveProjectTabOrder}){
   const [order,setOrder]=useState(tabOrder);const[dragIdx,setDragIdx]=useState(null);
   const [newTagName,setNewTagName]=useState("");const[newTagColor,setNewTagColor]=useState("#00D4FF");
   const [checking,setChecking]=useState(false);
@@ -3468,7 +3571,7 @@ function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,t
 
       {/* Tab order */}
       <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Tab Order — drag to rearrange</div>
-      <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:20}}>
+      <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:currentProject?8:20}}>
         {order.map((tab,i)=>(
           <div key={tab.key} draggable onDragStart={()=>onDragStart(i)} onDragOver={e=>onDragOver(e,i)} onDrop={onDrop} onDragEnd={onDrop}
             style={{display:"flex",alignItems:"center",gap:12,padding:"9px 14px",background:dragIdx===i?"var(--accent-dim)":"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:8,cursor:"grab",opacity:dragIdx===i?.4:1}}>
@@ -3478,6 +3581,16 @@ function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,t
           </div>
         ))}
       </div>
+      {currentProject&&(
+        <div style={{marginBottom:20,padding:"10px 14px",background:"rgba(255,179,71,.06)",border:"1px solid rgba(255,179,71,.25)",borderRadius:8}}>
+          <p style={{fontSize:12,color:"#FFB347",fontFamily:"'Syne'",fontWeight:600,marginBottom:6}}>⇅ Project-specific order for: {currentProject.name}</p>
+          <p style={{fontSize:11,color:"var(--txt-muted)",marginBottom:10}}>Save this arrangement as the default for this project only. Overrides your global setting just for this project.</p>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button className="q-btn-ghost" style={{padding:"6px 14px",fontSize:12,color:"#FFB347",borderColor:"rgba(255,179,71,.4)"}} onClick={()=>onSaveProjectTabOrder&&onSaveProjectTabOrder(currentProject.id,order)}>Save for {currentProject.name}</button>
+            {currentProject.tabOrderOverride&&<button className="q-btn-ghost" style={{padding:"6px 14px",fontSize:12}} onClick={()=>onSaveProjectTabOrder&&onSaveProjectTabOrder(currentProject.id,null)}>← Use global order</button>}
+          </div>
+        </div>
+      )}
 
       {/* Tag management */}
       <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",letterSpacing:".8px",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Tags</div>
@@ -3623,7 +3736,22 @@ function VersionForm({data,setData,onSubmit,onCancel}){
 }
 function MilestoneForm({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Add Milestone</h2><Field label="Title *"><input className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., Submit to Play Store"/></Field><Field label="Target Date"><input type="date" className="q-input" value={data.date||""} onChange={e=>set("date",e.target.value)}/></Field><Field label="Description"><QTextarea className="q-input" style={{height:72,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="Optional…"/></Field><FormActions onCancel={onCancel} onSubmit={()=>data.title?.trim()&&onSubmit(data)} submitLabel="Add Milestone"/></div>);}
 function NoteForm({data,setData,title,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>{title}</h2><Field label="Content *"><QTextarea className="q-input" style={{height:160,resize:"vertical"}} autoFocus value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Write your note…"/></Field><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Save Note"/></div>);}
-function AssetForm({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Add Asset Link</h2><Field label="Name *"><QInput className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., Play Store Icon"/></Field><Field label="URL *"><QInput className="q-input" value={data.url||""} onChange={e=>set("url",e.target.value)} placeholder="https://…"/></Field><Field label="Type"><select className="q-input" value={data.type||"Link"} onChange={e=>set("type",e.target.value)}>{ASSET_TYPES.map(t=><option key={t} value={t}>{t}</option>)}</select></Field><FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&data.url?.trim()&&onSubmit(data)} submitLabel="Add Asset"/></div>);}
+function AssetForm({data,setData,onSubmit,onCancel}){
+  const set=(k,v)=>setData(d=>({...d,[k]:v}));
+  return(
+    <div>
+      <h2 style={s.modalTitle}>Add Asset</h2>
+      <Field label="Type">
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+          {ASSET_TYPES.map(t=><button key={t} className={`q-chip${(data.type||"Link")===t?" q-chip-on":""}`} onClick={()=>set("type",t)} style={{fontSize:12}}>{ASSET_ICONS[t]} {t}</button>)}
+        </div>
+      </Field>
+      <Field label="Name *"><QInput className="q-input" value={data.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g., App Icon, Play Store Listing…"/></Field>
+      <Field label="URL / Value *"><QInput className="q-input" value={data.url||""} onChange={e=>set("url",e.target.value)} placeholder="https://… or #hex color or description"/></Field>
+      <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&data.url?.trim()&&onSubmit(data)} submitLabel="Add Asset"/>
+    </div>
+  );
+}
 function IssueForm({data,setData,onSubmit,onCancel}){
   const set=(k,v)=>setData(d=>({...d,[k]:v}));
   return(
