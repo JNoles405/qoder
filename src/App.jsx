@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.7.2";
+const APP_VER    = "v0.7.5";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -318,14 +318,14 @@ async function loadProjects(url,key,token,userId){
   return rows.map(p=>({
     id:p.id,name:p.name,description:p.description,status:p.status,
     techStack:p.tech_stack||[],localFolder:p.local_folder||null,
-    gitUrl:p.git_url||"",supabaseUrl:p.supabase_url||"",vercelUrl:p.vercel_url||"",groupId:p.group_id||null,
+    gitUrl:p.git_url||"",supabaseUrl:p.supabase_url||"",vercelUrl:p.vercel_url||"",groupId:p.group_id||null,dependsOn:p.depends_on||[],
     isPublic:p.is_public||false,publicSlug:p.public_slug||null,
     color:p.color||null,
     position:p.position,createdAt:p.created_at,
     tagIds:      ptRows.filter(pt=>pt.project_id===p.id).map(pt=>pt.tag_id),
     versions:    vers.filter(v=>v.project_id===p.id).map(v=>({id:v.id,version:v.version,releaseNotes:v.release_notes,date:v.date,fileLinks:v.file_links||[]})),
     milestones:  miles.filter(m=>m.project_id===p.id).map(m=>({id:m.id,title:m.title,description:m.description,date:m.date,completed:m.completed,completedAt:m.completed_at,createdAt:m.created_at})),
-    notes:       notes.filter(n=>n.project_id===p.id).map(n=>({id:n.id,content:n.content,position:n.position,createdAt:n.created_at})),
+    notes:       notes.filter(n=>n.project_id===p.id).map(n=>({id:n.id,content:n.content,position:n.position,pinned:n.pinned||false,createdAt:n.created_at})),
     todos:       todos.filter(t=>t.project_id===p.id).map(t=>({id:t.id,text:t.text,completed:t.completed,completedAt:t.completed_at,priority:t.priority||"medium",recurring:t.recurring||false,recurrenceType:t.recurrence_type||null,sprintId:t.sprint_id||null,position:t.position,createdAt:t.created_at})),
     sprints:     sprints.filter(sp=>sp.project_id===p.id).map(sp=>({id:sp.id,name:sp.name,goal:sp.goal,startDate:sp.start_date,endDate:sp.end_date,status:sp.status||"active",position:sp.position,createdAt:sp.created_at})),
     timeSessions:timeSess.filter(ts=>ts.project_id===p.id).map(ts=>({id:ts.id,startedAt:ts.started_at,endedAt:ts.ended_at,durationSeconds:ts.duration_seconds,note:ts.note,createdAt:ts.created_at})),
@@ -772,6 +772,12 @@ export default function QoderApp() {
   const [updateStatus,    setUpdateStatus]    = useState(null); // null | "available" | "downloading" | "ready" | "current" | "error"
   const [updateError,     setUpdateError]     = useState("");
   const [cmdPalette,      setCmdPalette]      = useState(false);
+  const [draggedTodo,     setDraggedTodo]     = useState(null); // {todo, sourcePid}
+  const [dragOverPid,     setDragOverPid]     = useState(null);
+  const [jotPad,          setJotPad]          = useState(false);
+  const [compareModal,    setCompareModal]    = useState(false);
+  const [jotText,         setJotText]         = useState("");
+  const [checklistTemplates, setChecklistTemplates] = useState([]);
   const [tabOrder,        setTabOrder]        = useState(DEFAULT_TABS);
   const [tagFilter,       setTagFilter]       = useState(null);
   const [lightbox,        setLightbox]        = useState(null);
@@ -903,7 +909,7 @@ export default function QoderApp() {
     if (!window.electronAPI?.onUpdateAvailable) return;
     const cleanA  = window.electronAPI.onUpdateAvailable((_,v)=>setUpdateStatus("available"));
     const cleanP  = window.electronAPI.onUpdateProgress?.(()=>setUpdateStatus("downloading")); // progress events keep status as downloading
-    const cleanR  = window.electronAPI.onUpdateReady((_,v)=>setUpdateStatus("ready"));
+    const cleanR  = window.electronAPI.onUpdateReady((_,v)=>{console.log("[updater] ready",v);setUpdateStatus("ready");});
     const cleanN  = window.electronAPI.onUpdateNotAvailable?.(()=>setUpdateStatus("current"));
     const cleanE  = window.electronAPI.onUpdateError?.((_,msg)=>setUpdateStatus("error"));
     const cleanM  = window.electronAPI.onMenuCheckUpdates?.(()=>handleCheckForUpdates());
@@ -932,6 +938,7 @@ export default function QoderApp() {
             setGroups(grps1);
             try{
               const trows=await sb.get(saved.url,saved.key,res.access_token,"project_templates",`?user_id=eq.${res.user.id}&order=created_at.desc`);
+              setChecklistTemplates((trows||[]).filter(t=>t.template_type==="checklist"));
               setTemplates(trows.map(r=>({id:r.id,name:r.name,description:r.description,templateData:r.template_data,createdAt:r.created_at})));
             }catch{}
             try{
@@ -1053,6 +1060,8 @@ export default function QoderApp() {
       }
       // Ctrl+K — command palette
       if(e.ctrlKey&&e.key==="k"){e.preventDefault();setCmdPalette(v=>!v);return;}
+      // Ctrl+J — quick note jot pad
+      if(e.ctrlKey&&e.key==="j"){e.preventDefault();setJotPad(v=>!v);return;}
       // ? — keyboard shortcuts help
       if(e.key==="?"&&!e.ctrlKey&&!e.altKey&&!["INPUT","TEXTAREA","SELECT"].includes(document.activeElement?.tagName)){
         openModal("shortcuts",{});return;
@@ -1160,7 +1169,7 @@ export default function QoderApp() {
     }catch(e){showToast(e.message,"err");return null;}
   };
   const updateProject=async(id,p)=>{
-    try{await sb.patch(cfg.url,cfg.key,T(),"projects",id,{name:p.name,description:p.description||null,status:p.status,tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,color:p.color||null,group_id:p.groupId||null});mutate(id,x=>({...x,...p}));showToast("Project updated");}
+    try{await sb.patch(cfg.url,cfg.key,T(),"projects",id,{name:p.name,description:p.description||null,status:p.status,tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,color:p.color||null,group_id:p.groupId||null,depends_on:p.dependsOn||[]});mutate(id,x=>({...x,...p}));showToast("Project updated");}
     catch(e){showToast(e.message,"err");}
   };
   const deleteProject=async(id)=>{
@@ -1226,6 +1235,22 @@ export default function QoderApp() {
     }catch(e){showToast(e.message,"err");}
   };
 
+  const handleTodoDrop=async(targetPid)=>{
+    if(!draggedTodo||draggedTodo.sourcePid===targetPid)return;
+    setDragOverPid(null);
+    const {todo,sourcePid}=draggedTodo;
+    setDraggedTodo(null);
+    try{
+      // Move: add to target, delete from source
+      const position=(projects.find(p=>p.id===targetPid)?.todos?.length||0);
+      const row=await sb.post(cfg.url,cfg.key,T(),"todos",{project_id:targetPid,text:todo.text,completed:false,priority:todo.priority,recurring:todo.recurring||false,recurrence_type:todo.recurrenceType||null,position});
+      mutate(targetPid,p=>({...p,todos:[...p.todos,{id:row.id,text:row.text,completed:false,completedAt:null,priority:row.priority||"medium",recurring:row.recurring||false,recurrenceType:row.recurrence_type||null,sprintId:null,position:row.position,createdAt:row.created_at}]}));
+      await sb.del(cfg.url,cfg.key,T(),"todos",todo.id);
+      mutate(sourcePid,p=>({...p,todos:p.todos.filter(t=>t.id!==todo.id)}));
+      const targetName=projects.find(p=>p.id===targetPid)?.name||"project";
+      showToast(`Todo moved to "${targetName}"`);
+    }catch(e){showToast(e.message,"err");}
+  };
   const cloneTodosToProject=async(sourcePid,targetPid,todoIds)=>{
     const sourceTodos=projects.find(p=>p.id===sourcePid)?.todos||[];
     const todosToClone=todoIds.length>0?sourceTodos.filter(t=>todoIds.includes(t.id)):sourceTodos.filter(t=>!t.completed);
@@ -1243,7 +1268,29 @@ export default function QoderApp() {
   };
 
   // ── Versions ─────────────────────────────────────────────────────────────────
-  const addVersion=async(pid,v)=>{try{const row=await sb.post(cfg.url,cfg.key,T(),"versions",{project_id:pid,version:v.version,release_notes:v.releaseNotes||null,date:v.date||new Date().toISOString(),file_links:(v.fileLinks||[]).filter(Boolean)});mutate(pid,p=>({...p,versions:[{id:row.id,version:row.version,releaseNotes:row.release_notes,date:row.date,fileLinks:row.file_links||[]},...p.versions]}));showToast("Version logged");}catch(e){showToast(e.message,"err");}};
+  const addVersion=async(pid,v)=>{
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"versions",{project_id:pid,version:v.version,release_notes:v.releaseNotes||null,date:v.date||new Date().toISOString(),file_links:(v.fileLinks||[]).filter(Boolean)});
+      mutate(pid,p=>({...p,versions:[{id:row.id,version:row.version,releaseNotes:row.release_notes,date:row.date,fileLinks:row.file_links||[]},...p.versions]}));
+      showToast("Version logged");
+      // ── Workflow rule: auto-set "Released" when version logged + no critical open issues
+      const proj=projects.find(p=>p.id===pid);
+      if(proj&&proj.status==="beta"){
+        const critOpen=(proj.issues||[]).filter(i=>i.status==="open"&&i.priority==="critical");
+        if(critOpen.length===0){
+          await sb.patch(cfg.url,cfg.key,T(),"projects",pid,{status:"released"});
+          mutate(pid,p=>({...p,status:"released"}));
+          showToast("🎉 Status auto-set to Released","ok");
+        }
+      }
+      // Workflow rule: auto-set "Beta" when first version is logged in "in-dev"
+      if(proj&&proj.status==="in-dev"&&!proj.versions?.length){
+        await sb.patch(cfg.url,cfg.key,T(),"projects",pid,{status:"beta"});
+        mutate(pid,p=>({...p,status:"beta"}));
+        showToast("Status auto-set to Beta","info");
+      }
+    }catch(e){showToast(e.message,"err");}
+  };
   const deleteVersion=async(pid,vid)=>{try{await sb.del(cfg.url,cfg.key,T(),"versions",vid);mutate(pid,p=>({...p,versions:p.versions.filter(v=>v.id!==vid)}));showToast("Version removed");}catch(e){showToast(e.message,"err");}};
 
   // ── Milestones ────────────────────────────────────────────────────────────────
@@ -1255,7 +1302,20 @@ export default function QoderApp() {
   const addNote=async(pid,content)=>{const position=projects.find(p=>p.id===pid)?.notes?.length||0;try{const row=await sb.post(cfg.url,cfg.key,T(),"notes",{project_id:pid,content,position});mutate(pid,p=>({...p,notes:[...p.notes,{id:row.id,content:row.content,position:row.position,createdAt:row.created_at}]}));showToast("Note added");}catch(e){showToast(e.message,"err");}};
   const updateNote=async(pid,nid,content)=>{try{await sb.patch(cfg.url,cfg.key,T(),"notes",nid,{content});mutate(pid,p=>({...p,notes:p.notes.map(n=>n.id===nid?{...n,content}:n)}));showToast("Note updated");}catch(e){showToast(e.message,"err");}};
   const deleteNote=async(pid,nid)=>{try{await sb.del(cfg.url,cfg.key,T(),"notes",nid);mutate(pid,p=>({...p,notes:p.notes.filter(n=>n.id!==nid)}));showToast("Note deleted");}catch(e){showToast(e.message,"err");}};
+  const linkIssueToVersion=async(pid,iid,vid)=>{
+    try{await sb.patch(cfg.url,cfg.key,T(),"issues",iid,{fixed_in_version_id:vid||null});
+    mutate(pid,p=>({...p,issues:p.issues.map(i=>i.id===iid?{...i,fixedInVersionId:vid||null}:i)}));}
+    catch(e){showToast(e.message,"err");}
+  };
   const reorderNotes=async(pid,reordered)=>{mutate(pid,p=>({...p,notes:reordered}));try{await Promise.all(reordered.map((n,i)=>sb.patch(cfg.url,cfg.key,T(),"notes",n.id,{position:i})));}catch{}};
+  const pinNote=async(pid,nid)=>{
+    const note=projects.find(p=>p.id===pid)?.notes?.find(n=>n.id===nid);
+    if(!note)return;
+    const pinned=!note.pinned;
+    try{await sb.patch(cfg.url,cfg.key,T(),"notes",nid,{pinned});
+    mutate(pid,p=>({...p,notes:p.notes.map(n=>n.id===nid?{...n,pinned}:n)}));}
+    catch(e){showToast(e.message,"err");}
+  };
 
   // ── Todos — addTodo and toggleTodo defined later with recurring support ────────
   const deleteTodo=async(pid,tid)=>{try{await sb.del(cfg.url,cfg.key,T(),"todos",tid);mutate(pid,p=>({...p,todos:p.todos.filter(t=>t.id!==tid)}));}catch(e){showToast(e.message,"err");}};
@@ -1337,15 +1397,15 @@ export default function QoderApp() {
       return rel.html_url;
     }catch(e){showToast(e.message,"err");return null;}
   };
-  const fixIssue=async(pid,iid,fixDescription)=>{
+  const fixIssue=async(pid,iid,fixDescription,fixedInVersionId=null)=>{
     const fixedAt=new Date().toISOString();
     try{
-      await sb.patch(cfg.url,cfg.key,T(),"issues",iid,{status:"fixed",fix_description:fixDescription,fixed_at:fixedAt});
+      await sb.patch(cfg.url,cfg.key,T(),"issues",iid,{status:"fixed",fix_description:fixDescription,fixed_at:fixedAt,fixed_in_version_id:fixedInVersionId||null});
       const iss=projects.find(p=>p.id===pid)?.issues.find(i=>i.id===iid);
       const noteContent=`🐛 Fixed: ${iss?.title||"Issue"}\n\n${fixDescription}\n\nFixed: ${new Date(fixedAt).toLocaleString()}`;
       const position=projects.find(p=>p.id===pid)?.notes?.length||0;
       const noteRow=await sb.post(cfg.url,cfg.key,T(),"notes",{project_id:pid,content:noteContent,position});
-      mutate(pid,p=>({...p,issues:p.issues.map(i=>i.id===iid?{...i,status:"fixed",fixDescription,fixedAt}:i),notes:[...p.notes,{id:noteRow.id,content:noteRow.content,position:noteRow.position,createdAt:noteRow.created_at}]}));
+      mutate(pid,p=>({...p,issues:p.issues.map(i=>i.id===iid?{...i,status:"fixed",fixDescription,fixedAt,fixedInVersionId:fixedInVersionId||null}:i),notes:[...p.notes,{id:noteRow.id,content:noteRow.content,position:noteRow.position,createdAt:noteRow.created_at}]}));
       showToast("Issue fixed — note created");
     }catch(e){showToast(e.message,"err");}
   };
@@ -1408,6 +1468,34 @@ export default function QoderApp() {
       return row;
     }catch(e){showToast(e.message,"err");return null;}
   };
+  // ── Checklist Templates ──────────────────────────────────────────────────────
+  const saveChecklistTemplate=async(name,items)=>{
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"project_templates",{user_id:session.user.id,name,template_type:"checklist",template_data:{items},created_at:new Date().toISOString()});
+      setChecklistTemplates(ct=>[...ct,{id:row.id,name:row.name,template_type:"checklist",template_data:row.template_data}]);
+      showToast("Checklist template saved");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const deleteChecklistTemplate=async(id)=>{
+    try{await sb.del(cfg.url,cfg.key,T(),"project_templates",id);
+    setChecklistTemplates(ct=>ct.filter(t=>t.id!==id));}
+    catch(e){showToast(e.message,"err");}
+  };
+  const applyChecklistTemplate=async(pid,templateId)=>{
+    const tmpl=checklistTemplates.find(t=>t.id===templateId);
+    if(!tmpl)return;
+    const items=tmpl.template_data?.items||[];
+    showToast(`Applying "${tmpl.name}"…`,"info");
+    try{
+      for(const item of items){
+        const position=(projects.find(p=>p.id===pid)?.todos?.length||0);
+        const row=await sb.post(cfg.url,cfg.key,T(),"todos",{project_id:pid,text:item.text,completed:false,priority:item.priority||"medium",recurring:false,position});
+        mutate(pid,p=>({...p,todos:[...p.todos,{id:row.id,text:row.text,completed:false,completedAt:null,priority:row.priority||"medium",recurring:false,recurrenceType:null,sprintId:null,position:row.position,createdAt:row.created_at}]}));
+      }
+      showToast(`${items.length} todos added from "${tmpl.name}"`);
+    }catch(e){showToast(e.message,"err");}
+  };
+
   // ── Project Groups ────────────────────────────────────────────────────────────
   const addGroup=async(name,color)=>{
     const position=groups.length;
@@ -1426,6 +1514,15 @@ export default function QoderApp() {
   const assignProjectToGroup=async(pid,gid)=>{
     try{await sb.patch(cfg.url,cfg.key,T(),"projects",pid,{group_id:gid||null});
     setProjects(ps=>ps.map(p=>p.id===pid?{...p,groupId:gid||null}:p));}
+    catch(e){showToast(e.message,"err");}
+  };
+  const setProjectDependency=async(pid,depPid,add)=>{
+    const proj=projects.find(p=>p.id===pid);
+    if(!proj)return;
+    const current=proj.dependsOn||[];
+    const updated=add?[...new Set([...current,depPid])]:current.filter(id=>id!==depPid);
+    try{await sb.patch(cfg.url,cfg.key,T(),"projects",pid,{depends_on:updated});
+    mutate(pid,p=>({...p,dependsOn:updated}));}
     catch(e){showToast(e.message,"err");}
   };
   const reorderGroups=async(reordered)=>{
@@ -1537,6 +1634,7 @@ export default function QoderApp() {
   const loadTemplates=async()=>{
     try{
       const rows=await sb.get(cfg.url,cfg.key,T(),"project_templates",`?user_id=eq.${session.user.id}&order=created_at.desc`);
+      setChecklistTemplates((rows||[]).filter(t=>t.template_type==="checklist"));
       setTemplates(rows.map(r=>({id:r.id,name:r.name,description:r.description,templateData:r.template_data,createdAt:r.created_at})));
     }catch{}
   };
@@ -1627,11 +1725,13 @@ export default function QoderApp() {
       {toast&&<Toast {...toast}/>}
       {lightbox&&<Lightbox url={lightbox.url} name={lightbox.name} onClose={()=>setLightbox(null)}/>}
       {confirmState&&<ConfirmDialog msg={confirmState.msg} onYes={()=>{confirmState.resolve(true);setConfirmState(null);}} onNo={()=>{confirmState.resolve(false);setConfirmState(null);}}/>}
-      {cmdPalette&&<CommandPalette projects={projects} onClose={()=>setCmdPalette(false)} onOpen={(proj,tab)=>{setCmdPalette(false);openProject(proj,tab);}} onNewProject={()=>{setCmdPalette(false);openModal("add-project",{status:"planning",techStack:[],tagIds:[]});}} onNewNote={()=>{if(selProj){setCmdPalette(false);openModal("add-note",{});}}} onNewTodo={()=>{if(selProj){setCmdPalette(false);openModal("add-todo",{});}}} onDashboard={()=>{setCmdPalette(false);setView("dashboard");}} onSettings={()=>{setCmdPalette(false);openModal("settings",{});}} onExportAll={()=>{setCmdPalette(false);exportAllProjectsJSON(projects);}} onTimeReport={()=>{setCmdPalette(false);exportTimeReportCSV(projects);}}/>}
+      {compareModal&&selProj&&<VersionCompareModal versions={selProj.versions||[]} onClose={()=>setCompareModal(false)}/>}
+      {jotPad&&selProj&&<JotPad projectName={selProj.name} onSave={async(txt)=>{if(txt.trim()){await addNote(selProj.id,txt.trim());setJotText("");}setJotPad(false);}} onClose={()=>setJotPad(false)} value={jotText} onChange={setJotText}/>}
+      {cmdPalette&&<CommandPalette projects={projects} onClose={()=>setCmdPalette(false)} onOpen={(proj,tab)=>{setCmdPalette(false);openProject(proj,tab);}} onNewProject={()=>{setCmdPalette(false);openModal("add-project",{status:"planning",techStack:[],tagIds:[],allProjects:projects,dependsOn:[]});}} onNewNote={()=>{if(selProj){setCmdPalette(false);openModal("add-note",{});}}} onNewTodo={()=>{if(selProj){setCmdPalette(false);openModal("add-todo",{});}}} onDashboard={()=>{setCmdPalette(false);setView("dashboard");}} onSettings={()=>{setCmdPalette(false);openModal("settings",{});}} onExportAll={()=>{setCmdPalette(false);exportAllProjectsJSON(projects);}} onTimeReport={()=>{setCmdPalette(false);exportTimeReportCSV(projects);}}/>}
 
       {/* Update banner — unified with progress bar */}
       {(updateStatus==="available"||updateStatus==="downloading"||updateStatus==="ready")&&(
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:5000,background:updateStatus==="ready"?"var(--update-ok-bg)":"var(--update-info-bg)",borderBottom:`1px solid ${updateStatus==="ready"?"#4ADE80":"var(--accent)"}`,padding:"0",display:"flex",flexDirection:"column"}}>
+        <div style={{position:"fixed",top:window.electronAPI?32:0,left:0,right:window.electronAPI?140:0,zIndex:5000,background:updateStatus==="ready"?"var(--update-ok-bg)":"var(--update-info-bg)",borderBottom:`1px solid ${updateStatus==="ready"?"#4ADE80":"var(--accent)"}`,padding:"0",display:"flex",flexDirection:"column",borderRadius:window.electronAPI?"0 0 0 8px":0}}>
           {/* Progress bar — animates while downloading */}
           {(updateStatus==="available"||updateStatus==="downloading")&&(
             <div style={{height:3,background:"var(--border)",width:"100%"}}>
@@ -1649,7 +1749,8 @@ export default function QoderApp() {
             ):(
               <>
                 <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:13}}>↓ Downloading update…</span>
-                <span style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-muted)"}}>This may take a few minutes</span>
+                <span style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-muted)"}}>This may take a few minutes. If it stalls,</span>
+                <a href="https://github.com/JNoles405/qoder/releases/latest" target="_blank" rel="noreferrer" style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--accent)"}}>download manually</a>
                 <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12,marginLeft:"auto"}} onClick={()=>setUpdateStatus(null)}>Hide</button>
               </>
             )}
@@ -1704,11 +1805,19 @@ export default function QoderApp() {
                   const onDragStartG=i=>{dragG=i;};
                   const onDragOverG=(e,i)=>{e.preventDefault();if(dragG===null||dragG===i)return;const n=[...grouped];const[m]=n.splice(dragG,1);n.splice(i,0,m);reorderGroups(n.map(g=>({...g})));dragG=i;};
                   return grouped.map((g,gi)=>(
-                    <div key={g.id} draggable onDragStart={()=>onDragStartG(gi)} onDragOver={e=>onDragOverG(e,gi)} onDragEnd={()=>{dragG=null;}}>
-                      <div style={{display:"flex",alignItems:"center",padding:"6px 16px 3px",gap:6,cursor:"grab"}}>
-                        <span style={{color:"var(--txt-dim)",fontSize:12,userSelect:"none",flexShrink:0}}>⠿</span>
-                        {g.color&&<span style={{width:7,height:7,borderRadius:"50%",background:g.color,flexShrink:0}}/>}
-                        <span style={{fontSize:10,fontWeight:700,letterSpacing:"1.2px",color:"var(--txt-faint)",textTransform:"uppercase",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
+                    <div key={g.id} draggable onDragStart={()=>onDragStartG(gi)} onDragOver={e=>onDragOverG(e,gi)} onDragEnd={()=>{dragG=null;}}
+                      style={{
+                        marginTop: gi>0 ? 6 : 0,
+                        paddingTop: gi>0 ? 6 : 0,
+                        borderTop: gi>0 ? "1px solid var(--border-lg)" : "none",
+                      }}>
+                      <div style={{display:"flex",alignItems:"center",padding:"4px 12px 4px 10px",gap:6,cursor:"grab",
+                        borderLeft: g.color ? `2px solid ${g.color}40` : "2px solid transparent",
+                        marginLeft:6, borderRadius:"0 4px 4px 0",
+                      }}>
+                        <span style={{color:"var(--txt-dim)",fontSize:11,userSelect:"none",flexShrink:0}}>⠿</span>
+                        {g.color&&<span style={{width:6,height:6,borderRadius:"50%",background:g.color,flexShrink:0}}/>}
+                        <span style={{fontSize:10,fontWeight:700,letterSpacing:"1.2px",color:g.color||"var(--txt-faint)",textTransform:"uppercase",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",opacity:g.color?0.85:1}}>{g.name}</span>
                         <button onClick={async e=>{e.stopPropagation();if(await qConfirm(`Delete group "${g.name}"? Projects will be ungrouped.`))deleteGroup(g.id);}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:11,padding:"0 2px",lineHeight:1}} className="q-group-del">✕</button>
                       </div>
                       {g.items.map(p=><NavBtn key={p.id} active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/>)}
@@ -1719,7 +1828,7 @@ export default function QoderApp() {
                 {ungrouped.length>0&&<>
                   {grouped.some(g=>g.items.length>0)&&<div style={{...s.navSection,marginTop:4,opacity:.5}}>Other</div>}
                   <DraggableSidebarList items={ungrouped} onReorder={reorderProjects}>
-                    {p=><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/>}
+                    {p=><div onDragOver={e=>{if(draggedTodo)e.preventDefault();setDragOverPid(p.id);}} onDragLeave={()=>setDragOverPid(null)} onDrop={()=>handleTodoDrop(p.id)} style={{borderRadius:7,outline:draggedTodo&&dragOverPid===p.id?"2px dashed var(--accent)":"2px dashed transparent",transition:"outline .1s"}}><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/></div>}
                   </DraggableSidebarList>
                 </>}
                 {archived.length>0&&<>
@@ -1734,7 +1843,7 @@ export default function QoderApp() {
             })()}
           </nav>
           <div style={s.sidebarFoot}>
-            <button className="q-btn-new" onClick={()=>{openModal("add-project",{status:"planning",techStack:[],tagIds:[]});if(isMobile)setSidebarOpen(false);}}>+ New Project</button>
+            <button className="q-btn-new" onClick={()=>{openModal("add-project",{status:"planning",techStack:[],tagIds:[],allProjects:projects,dependsOn:[]});if(isMobile)setSidebarOpen(false);}}>+ New Project</button>
             <div style={{marginTop:10,display:"flex",gap:8,justifyContent:"space-between",alignItems:"center"}}>
               <span style={s.userEmail}>{session.user.email}</span>
             </div>
@@ -1756,7 +1865,7 @@ export default function QoderApp() {
       <main style={s.main}>
         {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"var(--txt)"}}>oder</span></div><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div>}
 
-        {view==="dashboard"&&<Dashboard projects={filtered} allProjects={projects} isMobile={isMobile} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} userTags={userTags} tagFilter={tagFilter} setTagFilter={setTagFilter} onOpen={openProject} onNew={()=>openModal("add-project",{status:"planning",techStack:[],tagIds:[]})} onExportAll={()=>exportAllProjectsJSON(projects)} onCmdPalette={()=>setCmdPalette(true)}/>}
+        {view==="dashboard"&&<Dashboard projects={filtered} allProjects={projects} isMobile={isMobile} search={search} setSearch={setSearch} filter={filter} setFilter={setFilter} userTags={userTags} tagFilter={tagFilter} setTagFilter={setTagFilter} onOpen={openProject} onNew={()=>openModal("add-project",{status:"planning",techStack:[],tagIds:[],allProjects:projects,dependsOn:[]})} onExportAll={()=>exportAllProjectsJSON(projects)} onCmdPalette={()=>setCmdPalette(true)} onWeeklySummary={()=>{const md=generateWeeklySummary(projects);const blob=new Blob([md],{type:"text/markdown"});const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=`qoder-weekly-${new Date().toISOString().slice(0,10)}.md`;a.click();URL.revokeObjectURL(u);showToast("Weekly summary downloaded");}}/>}
         {view==="project"&&liveProj&&(
           <ProjectView project={liveProj} tab={projTab} setTab={setProjTab} isMobile={isMobile} tabOrder={tabOrder}
             onAddVersion={()=>openModal("add-version",{fileLinks:[""]})}
@@ -1768,6 +1877,7 @@ export default function QoderApp() {
             onEditNote={n=>openModal("edit-note",{...n})}
             onDeleteNote={nid=>deleteNote(liveProj.id,nid)}
             onReorderNotes={r=>reorderNotes(liveProj.id,r)}
+            onPinNote={(nid)=>pinNote(liveProj.id,nid)}
             onAddTodo={(text,priority,recurring,recurrenceType)=>addTodo(liveProj.id,text,priority,recurring,recurrenceType)}
             onToggleTodo={tid=>toggleTodo(liveProj.id,tid)}
             onDeleteTodo={tid=>deleteTodo(liveProj.id,tid)}
@@ -1783,7 +1893,7 @@ export default function QoderApp() {
             onDeleteAsset={aid=>deleteAsset(liveProj.id,aid)}
             onUploadAssetFile={(file,name,type)=>uploadAssetFile(liveProj.id,file,name,type)}
             onAddIssue={()=>openModal("add-issue",{priority:"medium",screenshotUrls:[]})}
-            onFixIssue={iss=>openModal("fix-issue",{...iss})}
+            onFixIssue={iss=>openModal("fix-issue",{...iss,projectVersions:selProj?.versions||[]})}
             onDeleteIssue={iid=>deleteIssue(liveProj.id,iid)}
             onUpdateIssuePriority={(iid,p)=>updateIssuePriority(liveProj.id,iid,p)}
             onUploadIssueScreenshot={(iid,file)=>uploadIssueScreenshot(liveProj.id,iid,file)}
@@ -1829,6 +1939,7 @@ export default function QoderApp() {
             onExportPDF={()=>exportProjectPDF(liveProj)}
             onExportReadme={()=>downloadReadme(liveProj)}
             onExportTimeReport={()=>exportTimeReportCSV(projects)}
+            onCompare={()=>setCompareModal(true)}
             onAddSnippet={()=>openModal("add-snippet",{language:"javascript",tags:[]})}
             onEditSnippet={sn=>openModal("edit-snippet",{...sn})}
             onDeleteSnippet={sid=>deleteSnippet(liveProj.id,sid)}
@@ -1857,7 +1968,7 @@ export default function QoderApp() {
         {modal==="edit-note"    &&<NoteForm      data={form} setData={setForm} title="Edit Note" onSubmit={d=>{updateNote(selProj.id,d.id,d.content);closeModal();}}      onCancel={closeModal}/>}
         {modal==="add-asset"    &&<AssetForm     data={form} setData={setForm} onSubmit={d=>{addAsset(selProj.id,d);closeModal();}}                                       onCancel={closeModal}/>}
         {modal==="add-issue"    &&<IssueForm     data={form} setData={setForm} onSubmit={d=>{addIssue(selProj.id,d);closeModal();}}                                       onCancel={closeModal}/>}
-        {modal==="fix-issue"    &&<FixIssueModal data={form} setData={setForm} onSubmit={d=>{fixIssue(selProj.id,d.id,d.fixDescription);closeModal();}}                  onCancel={closeModal}/>}
+        {modal==="fix-issue"    &&<FixIssueModal data={form} setData={setForm} onSubmit={d=>{fixIssue(selProj.id,d.id,d.fixDescription,d.fixedInVersionId);closeModal();}}                  onCancel={closeModal}/>}
         {modal==="shortcuts"    &&<ShortcutsModal onCancel={closeModal}/>}
         {modal==="add-group"    &&<GroupForm     data={form} setData={setForm} onSubmit={d=>{addGroup(d.name,d.color);closeModal();}} onCancel={closeModal}/>}
         {modal==="add-snippet"   &&<SnippetForm   data={form} setData={setForm} onSubmit={d=>{addSnippet(selProj.id,d);closeModal();}}                          onCancel={closeModal}/>}
@@ -1939,7 +2050,7 @@ function DraggableSidebarList({items,onReorder,children}){
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
-function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFilter,userTags,tagFilter,setTagFilter,onOpen,onNew,onExportAll,onCmdPalette}){
+function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFilter,userTags,tagFilter,setTagFilter,onOpen,onNew,onExportAll,onCmdPalette,onWeeklySummary}){
   const [feedPeriod,setFeedPeriod]=useState("7d");
   const [showFeed,setShowFeed]=useState(true);
   const stats={total:allProjects.length,inDev:allProjects.filter(p=>p.status==="in-dev").length,released:allProjects.filter(p=>p.status==="released").length,open:allProjects.reduce((a,p)=>a+(p.milestones?.filter(m=>!m.completed).length||0),0)};
@@ -1958,6 +2069,7 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
         <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
           <button className="q-btn-ghost" style={{padding:"8px 12px",fontSize:12}} onClick={onCmdPalette} title="Ctrl+K">⌘ Quick Search</button>
           {!isMobile&&<button className="q-btn-ghost" style={{padding:"8px 12px",fontSize:12}} onClick={onExportAll}>Backup All</button>}
+          {!isMobile&&<button className="q-btn-ghost" style={{padding:"8px 12px",fontSize:12}} onClick={onWeeklySummary}>Week Summary</button>}
           <button className="q-btn-primary" style={{padding:isMobile?"7px 14px":"9px 18px",fontSize:isMobile?13:14}} onClick={onNew}>+ New Project</button>
         </div>
       </div>
@@ -2122,7 +2234,7 @@ function ScrollableTabBar({children,isMobile}){
 }
 
 // ── ProjectView ───────────────────────────────────────────────────────────────
-function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport}){
+function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
@@ -2210,7 +2322,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
       {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion} onDelete={onDeleteVersion} onChangelog={onChangelog}/>}
       {tab==="milestones" &&<MilestonesTab project={project} onAdd={onAddMilestone} onToggle={onToggleMilestone} onDelete={onDeleteMilestone}/>}
       {tab==="sprints"    &&<SprintsTab    project={project} onAdd={onAddSprint} onUpdateStatus={onUpdateSprintStatus} onDelete={onDeleteSprint} onAssignTodo={onAssignTodoToSprint}/>}
-      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos}/>}
+      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates} onApplyChecklist={(tid)=>applyChecklistTemplate(liveProj.id,tid)} onSaveAsTemplate={(name,items)=>saveChecklistTemplate(name,items)} onDragTodo={(todo)=>setDraggedTodo({todo,sourcePid:liveProj.id})}/>}
       {tab==="snippets"   &&<SnippetsTab   project={project} onAdd={onAddSnippet} onEdit={onEditSnippet} onDelete={onDeleteSnippet}/>}
       {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession}/>}
       {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes}/>}
@@ -2227,7 +2339,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
 }
 
 // ── Overview Tab ──────────────────────────────────────────────────────────────
-function OverviewTab({project,latestVer}){
+function OverviewTab({project,latestVer,allProjectsList}){
   const [sortDir,setSortDir]=useState("desc");
   const [period,setPeriod]=useState("all");
   const [search,setSearch]=useState("");
@@ -2251,12 +2363,29 @@ function OverviewTab({project,latestVer}){
           <div key={st.label} style={s.statCard}><div style={{fontFamily:"'JetBrains Mono'",fontSize:20,fontWeight:700,color:st.color,lineHeight:1}}>{st.value}</div><div style={s.statLbl}>{st.label}</div></div>
         ))}
       </div>
+      {(project.dependsOn||[]).length>0&&(()=>{
+        const deps=allProjectsList.filter(p=>(project.dependsOn||[]).includes(p.id));
+        if(!deps.length)return null;
+        return(
+          <div style={{...s.infoCard,borderColor:"#FFB347",background:"rgba(255,179,71,.04)"}}>
+            <div style={{...s.infoLbl,color:"#FFB347"}}>⛓ Depends On</div>
+            <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+              {deps.map(d=>(
+                <span key={d.id} style={{fontSize:12,padding:"3px 10px",borderRadius:6,background:`${STATUS_CONFIG[d.status]?.color||"#888"}18`,border:`1px solid ${STATUS_CONFIG[d.status]?.color||"#888"}40`,color:STATUS_CONFIG[d.status]?.color||"var(--txt-muted)",fontFamily:"'Syne'",fontWeight:600}}>
+                  {d.name} <span style={{opacity:.7,fontWeight:400}}>{STATUS_CONFIG[d.status]?.label}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       {msTotal>0&&<div style={s.infoCard}><div style={s.infoLbl}>Milestone Progress</div><div style={{...s.bar,height:8,marginTop:10}}><div style={{...s.barFill,width:`${pct}%`,height:8,transition:"width .6s"}}/></div><div style={{...s.mono10,marginTop:5,color:"var(--txt-muted)"}}>{msDone} of {msTotal} complete</div></div>}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         <QInput className="q-input" style={{flex:1,minWidth:140,maxWidth:260,marginTop:0}} placeholder="Search feed…" value={search} onChange={e=>setSearch(e.target.value)}/>
         <button className="q-chip" style={{fontFamily:"'JetBrains Mono'",fontSize:11}} onClick={()=>setSortDir(d=>d==="desc"?"asc":"desc")}>{sortDir==="desc"?"↓ Newest":"↑ Oldest"}</button>
         <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{TIME_PERIODS.map(p=><button key={p.key} className={`q-chip${period===p.key?" q-chip-on":""}`} style={{fontSize:11,padding:"3px 9px"}} onClick={()=>setPeriod(p.key)}>{p.label}</button>)}</div>
       </div>
+      <BurndownChart project={project}/>
       {items.length===0?<div style={s.empty}><p>No activity for this period.</p></div>:(
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
           {items.map(item=>{const meta=FEED_META[item.type]||FEED_META.note;return(
@@ -2279,13 +2408,14 @@ function OverviewTab({project,latestVer}){
 }
 
 // ── Versions Tab ──────────────────────────────────────────────────────────────
-function VersionsTab({project,onAdd,onDelete,onChangelog}){
+function VersionsTab({project,onAdd,onDelete,onChangelog,onCompare}){
   return(
     <div>
       <div style={s.tabBar}>
         <span style={s.mono12}>{project.versions?.length||0} releases</span>
         <div style={{display:"flex",gap:8}}>
           {project.versions?.length>0&&<button className="q-btn-ghost" style={{fontSize:12,padding:"7px 12px"}} onClick={onChangelog}>Changelog</button>}
+          {(project.versions?.length||0)>=2&&<button className="q-btn-ghost" style={{fontSize:12,padding:"7px 12px"}} onClick={onCompare}>Compare</button>}
           <button className="q-btn-primary" onClick={onAdd}>+ Log Version</button>
         </div>
       </div>
@@ -2331,12 +2461,14 @@ function MilestonesTab({project,onAdd,onToggle,onDelete}){
 }
 
 // ── Todo Tab ──────────────────────────────────────────────────────────────────
-function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSprint,allProjects,onCloneTodos}){
+function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSprint,allProjects,onCloneTodos,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo}){
   const [newText,setNewText]=useState("");
   const [newPriority,setNewPriority]=useState("medium");
   const [newRecurring,setNewRecurring]=useState(false);
   const [newRecType,setNewRecType]=useState("weekly");
   const [showClone,setShowClone]=useState(false);
+  const [showSaveTemplate,setShowSaveTemplate]=useState(false);
+  const [templateName,setTemplateName]=useState("");
   const [cloneTarget,setCloneTarget]=useState("");
   const [cloneMode,setCloneMode]=useState("open"); // "open"|"select"
   const [cloneSelected,setCloneSelected]=useState(new Set());
@@ -2357,12 +2489,25 @@ function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSpri
     <div>
       <div style={s.tabBar}>
         <span style={s.mono12}>{done.length}/{todos.length} completed</span>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          {checklistTemplates?.length>0&&<select className="q-input" style={{width:160,marginTop:0,fontSize:11,padding:"5px 8px"}} value="" onChange={e=>{if(e.target.value)onApplyChecklist(e.target.value);}}>
+            <option value="">+ Checklist…</option>
+            {checklistTemplates.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>}
           {done.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11,color:"#FF6B9D"}} onClick={async()=>{if(await qConfirm(`Delete all ${done.length} completed todos?`))done.forEach(t=>onDelete(t.id));}}>Clear Done</button>}
           {pending.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={async()=>{if(await qConfirm(`Mark all ${pending.length} open todos as complete?`))pending.forEach(t=>onToggle(t.id));}}>Complete All</button>}
+          {pending.length>0&&onApplyChecklist&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} title="Save open todos as reusable checklist" onClick={()=>{setTemplateName("");setShowSaveTemplate(true);}}>Save as Checklist</button>}
           {otherProjects.length>0&&<button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12}} onClick={()=>setShowClone(v=>!v)}>Clone to Project…</button>}
         </div>
       </div>
+      {showSaveTemplate&&(
+        <div style={{display:"flex",gap:8,marginBottom:14,padding:"10px 14px",background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:8,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontSize:13,color:"var(--accent-text)",fontFamily:"'Syne'",fontWeight:700,flexShrink:0}}>💾 Save checklist:</span>
+          <QInput className="q-input" style={{flex:1,minWidth:140,marginTop:0,fontSize:13}} value={templateName} onChange={e=>setTemplateName(e.target.value)} placeholder="Template name…" autoFocus onKeyDown={e=>{if(e.key==="Enter"&&templateName.trim()){onApplyChecklist&&onSaveTemplate&&onSaveTemplate(templateName.trim(),pending);setShowSaveTemplate(false);}if(e.key==="Escape")setShowSaveTemplate(false);}}/>
+          <button className="q-btn-primary" style={{padding:"7px 14px",fontSize:12,flexShrink:0}} disabled={!templateName.trim()} onClick={()=>{if(onSaveAsTemplate)onSaveAsTemplate(templateName.trim(),pending);setShowSaveTemplate(false);}}>Save</button>
+          <button className="q-btn-ghost" style={{padding:"7px 10px",fontSize:12,flexShrink:0}} onClick={()=>setShowSaveTemplate(false)}>Cancel</button>
+        </div>
+      )}
       {showClone&&(
         <div style={{marginBottom:14,padding:"14px",background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:8}}>
           <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
@@ -2409,17 +2554,17 @@ function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSpri
         </select>}
       </div>
       {todos.length===0&&<div style={s.empty}><p>No to-do items yet.</p></div>}
-      {pending.length>0&&<DraggableList items={pending} onReorder={r=>onReorder([...r,...done])}>{todo=><TodoRow todo={todo} activeSprints={activeSprints} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}} onAssignSprint={sid=>onAssignSprint(todo.id,sid)}/>}</DraggableList>}
+      {pending.length>0&&<DraggableList items={pending} onReorder={r=>onReorder([...r,...done])}>{todo=><TodoRow todo={todo} activeSprints={activeSprints} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}} onAssignSprint={sid=>onAssignSprint(todo.id,sid)} onDragTodo={onDragTodo}/>}</DraggableList>}
       {done.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",letterSpacing:1.2,textTransform:"uppercase",padding:"14px 0 6px",fontWeight:700}}>Completed ({done.length})</div>{done.map(todo=><TodoRow key={todo.id} todo={todo} activeSprints={activeSprints} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}} onAssignSprint={sid=>onAssignSprint(todo.id,sid)}/>)}</>}
     </div>
   );
 }
-function TodoRow({todo,onToggle,onDelete,activeSprints,onAssignSprint}){
+function TodoRow({todo,onToggle,onDelete,activeSprints,onAssignSprint,onDragTodo}){
   const pc=PRIORITY_CONFIG[todo.priority||"medium"];
   const sprint=activeSprints?.find(sp=>sp.id===todo.sprintId);
   return(
     <div className="q-ms-row" style={{opacity:todo.completed?.5:1}}>
-      <span style={{color:"var(--txt-dim)",fontSize:16,cursor:"grab",userSelect:"none",flexShrink:0}}>⠿</span>
+      <span style={{color:"var(--txt-dim)",fontSize:16,cursor:"grab",userSelect:"none",flexShrink:0}} draggable onDragStart={()=>onDragTodo&&onDragTodo(todo)} onDragEnd={()=>{}}>⠿</span>
       <button className={`q-check${todo.completed?" q-check-done":""}`} onClick={onToggle}>{todo.completed&&"✓"}</button>
       <span style={{fontSize:11,flexShrink:0,marginTop:1}} title={pc.label}>{pc.icon}</span>
       <div style={{flex:1}}>
@@ -2442,42 +2587,57 @@ function TodoRow({todo,onToggle,onDelete,activeSprints,onAssignSprint}){
 }
 
 // ── Notes Tab ─────────────────────────────────────────────────────────────────
-function NotesTab({project,onAdd,onEdit,onDelete,onReorder}){
+function NotesTab({project,onAdd,onEdit,onDelete,onReorder,onPin}){
   const [search,setSearch]=useState("");
   const [mdMode,setMdMode]=useState(true);
   const notes=project.notes||[];
-  const filtered=search.trim()?notes.filter(n=>n.content.toLowerCase().includes(search.toLowerCase())):notes;
+  const pinned=notes.filter(n=>n.pinned);
+  const unpinned=notes.filter(n=>!n.pinned);
+  const filtered=search.trim()?notes.filter(n=>n.content.toLowerCase().includes(search.toLowerCase())):null;
   const isSearching=!!search.trim();
+  const NoteCard=({note,draggable=false})=>(
+    <div className="q-ver-card" style={{marginBottom:10,borderLeft:note.pinned?"2px solid #FFB347":"none",paddingLeft:note.pinned?10:0}}>
+      <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+        {draggable&&!isSearching&&<span style={{color:"var(--txt-dim)",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span>}
+        <div style={{flex:1,minWidth:0}}>
+          {mdMode
+            ?<div style={{lineHeight:1.7}}>{renderMarkdown(note.content)}</div>
+            :<p style={{color:"var(--txt-sub)",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap"}}>{note.content}</p>
+          }
+        </div>
+        <div style={{display:"flex",gap:4,flexShrink:0}}>
+          <button title={note.pinned?"Unpin":"Pin note"} onClick={()=>onPin(note.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:14,opacity:note.pinned?1:.35,padding:"2px 4px",transition:"opacity .15s"}} onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=note.pinned?1:.35}>📌</button>
+          <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit(note)}>Edit</button>
+          <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this note?"))onDelete(note.id);}}>✕</button>
+        </div>
+      </div>
+      <div style={{...s.mono10,marginTop:8,color:"var(--txt-dim)"}}>{new Date(note.createdAt).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"})}</div>
+    </div>
+  );
   return(
     <div>
       <div style={s.tabBar}>
-        <span style={s.mono12}>{notes.length} {notes.length===1?"note":"notes"}{isSearching?` · ${filtered.length} matching`:""}</span>
+        <span style={s.mono12}>{notes.length} {notes.length===1?"note":"notes"}{isSearching?` · ${(filtered||[]).length} matching`:""}</span>
         <div style={{display:"flex",gap:8}}>
           <button className={`q-chip${mdMode?" q-chip-on":""}`} style={{fontSize:11}} onClick={()=>setMdMode(v=>!v)}>{mdMode?"Markdown On":"Plain Text"}</button>
           <button className="q-btn-primary" onClick={onAdd}>+ Add Note</button>
         </div>
       </div>
       <QInput className="q-input" style={{marginBottom:14,marginTop:0}} placeholder="Search notes…" value={search} onChange={e=>setSearch(e.target.value)}/>
-      {notes.length===0?<div style={s.empty}><p>No notes yet.</p></div>:
-        filtered.length===0?<div style={s.empty}><p>No notes match "{search}"</p></div>:(
-        <DraggableList items={isSearching?filtered:notes} onReorder={isSearching?()=>{}:onReorder}>{note=>(
-          <div className="q-ver-card" style={{marginBottom:10}}>
-            <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
-              {!isSearching&&<span style={{color:"var(--txt-dim)",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span>}
-              <div style={{flex:1,minWidth:0}}>
-                {mdMode
-                  ?<div style={{lineHeight:1.7}}>{renderMarkdown(note.content)}</div>
-                  :<p style={{color:"var(--txt-sub)",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap"}}>{note.content}</p>
-                }
-              </div>
-              <div style={{display:"flex",gap:6,flexShrink:0}}>
-                <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit(note)}>Edit</button>
-                <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this note?"))onDelete(note.id);}}>✕</button>
-              </div>
-            </div>
-            <div style={{...s.mono10,marginTop:8,color:"var(--txt-dim)"}}>{new Date(note.createdAt).toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"})}</div>
-          </div>
-        )}</DraggableList>
+      {notes.length===0&&<div style={s.empty}><p>No notes yet.</p></div>}
+      {isSearching?(
+        filtered.length===0
+          ?<div style={s.empty}><p>No notes match "{search}"</p></div>
+          :filtered.map(note=><NoteCard key={note.id} note={note}/>)
+      ):(
+        <>
+          {pinned.length>0&&<>
+            <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#FFB347",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>📌 Pinned</div>
+            {pinned.map(note=><NoteCard key={note.id} note={note}/>)}
+            {unpinned.length>0&&<div style={{height:1,background:"var(--border)",margin:"12px 0"}}/>}
+          </>}
+          {unpinned.length>0&&<DraggableList items={unpinned} onReorder={r=>onReorder([...pinned,...r])}>{note=><NoteCard note={note} draggable/>}</DraggableList>}
+        </>
       )}
       {mdMode&&notes.length>0&&<p style={{...s.mono10,color:"var(--txt-faint)",marginTop:12,textAlign:"center"}}>Markdown on · **bold** *italic* `code` # Heading · toggle above for plain text</p>}
     </div>
@@ -2527,7 +2687,8 @@ function AssetsTab({project,onAdd,onDelete,onUploadFile,onLightbox}){
 }
 
 // ── Issues Tab ────────────────────────────────────────────────────────────────
-function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreenshot,onRemoveScreenshot,onAddComment,onDeleteComment,onLightbox}){
+function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreenshot,onRemoveScreenshot,onAddComment,onDeleteComment,onLightbox,onLinkVersion}){
+  const [viewMode,setViewMode]=useState("list"); // "list"|"kanban"
   const issues=project.issues||[];
   const open=issues.filter(i=>i.status==="open").sort((a,b)=>{const o=["critical","high","medium","low"];return o.indexOf(a.priority)-o.indexOf(b.priority);});
   const fixed=issues.filter(i=>i.status==="fixed");
@@ -2546,9 +2707,43 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
 
   return(
     <div>
-      <div style={s.tabBar}><span style={s.mono12}>{open.length} open · {fixed.length} fixed</span><button className="q-btn-primary" onClick={onAdd}>+ Log Issue</button></div>
+      <div style={s.tabBar}>
+        <span style={s.mono12}>{open.length} open · {fixed.length} fixed</span>
+        <div style={{display:"flex",gap:8}}>
+          <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid var(--border-md)"}}>
+            {["list","kanban"].map(m=><button key={m} onClick={()=>setViewMode(m)} style={{padding:"5px 12px",fontSize:11,background:viewMode===m?"var(--accent-dim)":"transparent",color:viewMode===m?"var(--accent-text)":"var(--txt-muted)",border:"none",cursor:"pointer",fontFamily:"'Syne'",fontWeight:600,textTransform:"capitalize"}}>{m==="list"?"≡ List":"⊞ Board"}</button>)}
+          </div>
+          <button className="q-btn-primary" onClick={onAdd}>+ Log Issue</button>
+        </div>
+      </div>
       {issues.length===0&&<div style={s.empty}><p>No issues logged. 🎉</p></div>}
-      {open.length>0&&<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>{open.map(iss=>{
+      {issues.length>0&&viewMode==="kanban"&&(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12,marginTop:8}}>
+          {[{key:"open",label:"Open",color:"#FF6B9D",items:open},{key:"fixed",label:"Fixed",color:"#4ADE80",items:fixed}].map(col=>(
+            <div key={col.key} style={{background:"var(--bg-input)",borderRadius:10,padding:12,border:`1px solid ${col.color}30`}}>
+              <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,fontWeight:700,letterSpacing:1,color:col.color,textTransform:"uppercase",marginBottom:10}}>{col.label} · {col.items.length}</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {col.items.map(iss=>(
+                  <div key={iss.id} style={{background:"var(--bg-card)",borderRadius:8,padding:"10px 12px",border:"1px solid var(--border)",borderLeft:`3px solid ${PRIORITY_CONFIG[iss.priority||"medium"].color}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:6}}>
+                      <span style={{fontSize:13,fontWeight:600,color:"var(--txt)",flex:1,lineHeight:1.3,textDecoration:iss.status==="fixed"?"line-through":""}}>{iss.title}</span>
+                      <button className="q-del" style={{flexShrink:0}} onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button>
+                    </div>
+                    {iss.description&&<p style={{fontSize:11,color:"var(--txt-muted)",marginTop:4,lineHeight:1.4}}>{iss.description.slice(0,80)}{iss.description.length>80?"…":""}</p>}
+                    <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{fontSize:10,padding:"1px 6px",borderRadius:4,background:PRIORITY_CONFIG[iss.priority||"medium"].bg,color:PRIORITY_CONFIG[iss.priority||"medium"].color,fontFamily:"'JetBrains Mono'"}}>{PRIORITY_CONFIG[iss.priority||"medium"].icon} {PRIORITY_CONFIG[iss.priority||"medium"].label}</span>
+                      {iss.status==="open"&&<button style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:"rgba(74,222,128,.1)",color:"#4ADE80",border:"1px solid rgba(74,222,128,.3)",cursor:"pointer",fontFamily:"'Syne'",fontWeight:700}} onClick={()=>onFix(iss)}>Fix →</button>}
+                    </div>
+                  </div>
+                ))}
+                {col.items.length===0&&<p style={{...s.mono10,color:"var(--txt-faint)",textAlign:"center",padding:"8px 0"}}>None</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {viewMode==="kanban"&&<div/>}
+      {viewMode==="list"&&open.length>0&&<div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:24}}>{open.map(iss=>{
         const pc=PRIORITY_CONFIG[iss.priority||"medium"];
         const commentCount=(iss.comments||[]).length;
         const isExpanded=expandedComments[iss.id];
@@ -2614,7 +2809,7 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
           </div>
         );
       })}</div>}
-      {fixed.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Fixed ({fixed.length})</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{fixed.map(iss=>(<div key={iss.id} className="q-ms-row" style={{opacity:.55}}><span style={{width:8,height:8,borderRadius:"50%",background:"#4ADE80",flexShrink:0,marginTop:5}}/><div style={{flex:1}}><span style={{color:"var(--txt)",fontSize:13,fontWeight:500,textDecoration:"line-through"}}>{iss.title}</span>{iss.fixDescription&&<p style={{color:"var(--txt-muted)",fontSize:12,marginTop:2}}>{iss.fixDescription}</p>}<div style={{...s.mono10,marginTop:3,color:"var(--txt-dim)"}}>{iss.fixedAt?new Date(iss.fixedAt).toLocaleDateString():""}</div></div><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button></div>))}</div></>}
+      {viewMode==="list"&&fixed.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Fixed ({fixed.length})</div><div style={{display:"flex",flexDirection:"column",gap:6}}>{fixed.map(iss=>(<div key={iss.id} className="q-ms-row" style={{opacity:.55}}><span style={{width:8,height:8,borderRadius:"50%",background:"#4ADE80",flexShrink:0,marginTop:5}}/><div style={{flex:1}}><span style={{color:"var(--txt)",fontSize:13,fontWeight:500,textDecoration:"line-through"}}>{iss.title}</span>{iss.fixDescription&&<p style={{color:"var(--txt-muted)",fontSize:12,marginTop:2}}>{iss.fixDescription}</p>}<div style={{...s.mono10,marginTop:3,color:"var(--txt-dim)"}}>{iss.fixedAt?new Date(iss.fixedAt).toLocaleDateString():""}{iss.fixedInVersionId&&project.versions&&" · "+("fixed in "+(project.versions.find(v=>v.id===iss.fixedInVersionId)?.version||""))}</div></div><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this issue?"))onDelete(iss.id);}}>✕</button></div>))}</div></>}
     </div>
   );
 }
@@ -3080,6 +3275,7 @@ function BuildLogTab({project,onAdd,onUpdateStatus,onDelete}){
           );})}
         </div>
       )}
+      <BuildSizeTrendChart buildLogs={builds}/>
     </div>
   );
 }
@@ -3391,6 +3587,17 @@ function ProjectForm({data,setData,title,userTags,templates,groups,onSubmit,onCa
         </div>
         <p style={{...s.mono10,marginTop:6,color:"var(--txt-faint)"}}>Shows as colored dot in the sidebar</p>
       </Field>
+      {/* Depends on other projects */}
+      {groups!==undefined&&<Field label="Depends On">
+        <p style={{...s.mono10,color:"var(--txt-faint)",marginBottom:6}}>Mark projects this one requires to be released first</p>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+          {(data.allProjects||[]).filter(p=>p.id!==data.id&&p.status!=="archived").map(p=>{
+            const on=(data.dependsOn||[]).includes(p.id);
+            return<button key={p.id} onClick={()=>{const cur=data.dependsOn||[];set("dependsOn",on?cur.filter(x=>x!==p.id):[...cur,p.id]);}} style={{fontSize:12,padding:"4px 10px",borderRadius:10,background:on?"rgba(255,179,71,.15)":"var(--bg-card)",border:`1px solid ${on?"#FFB347":"var(--border-md)"}`,color:on?"#FFB347":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",fontWeight:600,transition:"all .15s"}}>{p.name}</button>;
+          })}
+          {!(data.allProjects||[]).filter(p=>p.id!==data.id&&p.status!=="archived").length&&<span style={{...s.mono10,color:"var(--txt-faint)"}}>No other projects yet</span>}
+        </div>
+      </Field>}
       <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&onSubmit(data)} submitLabel={title==="Edit Project"?"Save Changes":"Create Project"}/>
     </div>
   );
@@ -3422,7 +3629,30 @@ function IssueForm({data,setData,onSubmit,onCancel}){
     </div>
   );
 }
-function FixIssueModal({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Mark Issue Fixed</h2><div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.15)",borderRadius:8,padding:"10px 14px",marginBottom:16}}><p style={{color:"#4ADE80",fontSize:13,fontWeight:600}}>{data.title}</p>{data.description&&<p style={{color:"var(--txt-muted)",fontSize:12,marginTop:4}}>{data.description}</p>}</div><Field label="How was it fixed? *"><QTextarea className="q-input" style={{height:120,resize:"vertical"}} autoFocus value={data.fixDescription||""} onChange={e=>set("fixDescription",e.target.value)} placeholder="Describe the fix…"/></Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:6}}>A note will be automatically created with this fix.</p><FormActions onCancel={onCancel} onSubmit={()=>data.fixDescription?.trim()&&onSubmit(data)} submitLabel="Mark Fixed"/></div>);}
+function FixIssueModal({data,setData,onSubmit,onCancel}){
+  const set=(k,v)=>setData(d=>({...d,[k]:v}));
+  const versions=data.projectVersions||[];
+  return(
+    <div>
+      <h2 style={s.modalTitle}>Mark Issue Fixed</h2>
+      <div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.15)",borderRadius:8,padding:"10px 14px",marginBottom:16}}>
+        <p style={{color:"#4ADE80",fontSize:13,fontWeight:600}}>{data.title}</p>
+        {data.description&&<p style={{color:"var(--txt-muted)",fontSize:12,marginTop:4}}>{data.description}</p>}
+      </div>
+      <Field label="How was it fixed? *">
+        <QTextarea className="q-input" style={{height:100,resize:"vertical"}} autoFocus value={data.fixDescription||""} onChange={e=>set("fixDescription",e.target.value)} placeholder="Describe the fix…"/>
+      </Field>
+      {versions.length>0&&<Field label="Fixed in version (optional)">
+        <select className="q-input" value={data.fixedInVersionId||""} onChange={e=>set("fixedInVersionId",e.target.value||null)}>
+          <option value="">Not linked to a version</option>
+          {versions.map(v=><option key={v.id} value={v.id}>{v.version}</option>)}
+        </select>
+      </Field>}
+      <p style={{fontSize:12,color:"var(--txt-muted)",marginTop:6}}>A note will be automatically created with this fix.</p>
+      <FormActions onCancel={onCancel} onSubmit={()=>data.fixDescription?.trim()&&onSubmit(data)} submitLabel="Mark Fixed"/>
+    </div>
+  );
+}
 function IdeaForm({data,setData,title,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>{title}</h2><Field label="Idea *"><QTextarea className="q-input" style={{height:140,resize:"vertical"}} autoFocus value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Your idea…"/></Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:4}}>Ideas don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Save Idea"/></div>);}
 function ConceptForm({data,setData,cfg,session,projectId,onSubmit,onUploadFile,onCancel}){
   const set=(k,v)=>setData(d=>({...d,[k]:v}));
@@ -3784,12 +4014,10 @@ function ModalWrap({children,onClose}){
 // ── Command Palette ───────────────────────────────────────────────────────────
 function CommandPalette({projects,onClose,onOpen,onNewProject,onNewNote,onNewTodo,onDashboard,onSettings,onExportAll,onTimeReport}){
   const [q,setQ]=useState("");
+  const [idx,setIdx]=useState(0);
   const inputRef=useRef(null);
+  const listRef=useRef(null);
   useEffect(()=>{inputRef.current?.focus();},[]);
-  useEffect(()=>{
-    const h=e=>{if(e.key==="Escape")onClose();};
-    window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h);
-  },[]);
 
   const staticCmds=[
     {icon:"◈",label:"Go to Dashboard",        action:onDashboard,   hint:"dashboard"},
@@ -3800,6 +4028,28 @@ function CommandPalette({projects,onClose,onOpen,onNewProject,onNewNote,onNewTod
   ];
   const matchedCmds=q.trim()?staticCmds.filter(c=>(c.label+" "+c.hint).toLowerCase().includes(q.toLowerCase())):staticCmds;
   const matchedProjs=q.trim()?projects.filter(p=>p.name.toLowerCase().includes(q.toLowerCase())).slice(0,6):projects.filter(p=>p.status!=="archived").slice(0,5);
+  const allItems=[
+    ...matchedProjs.map(p=>({type:"proj",data:p,action:()=>onOpen(p,"overview")})),
+    ...matchedCmds.map(c=>({type:"cmd",data:c,action:c.action})),
+  ];
+  const safeIdx=Math.min(idx,Math.max(0,allItems.length-1));
+
+  useEffect(()=>setIdx(0),[q]);
+  useEffect(()=>{
+    const h=e=>{
+      if(e.key==="Escape"){onClose();return;}
+      if(e.key==="ArrowDown"){e.preventDefault();setIdx(i=>Math.min(i+1,allItems.length-1));return;}
+      if(e.key==="ArrowUp"){e.preventDefault();setIdx(i=>Math.max(i-1,0));return;}
+      if(e.key==="Enter"&&allItems[safeIdx]){e.preventDefault();allItems[safeIdx].action();return;}
+    };
+    window.addEventListener("keydown",h);return()=>window.removeEventListener("keydown",h);
+  },[allItems,safeIdx,onClose]);
+
+  // Scroll selected item into view
+  useEffect(()=>{
+    const el=listRef.current?.querySelector(`[data-idx="${safeIdx}"]`);
+    el?.scrollIntoView({block:"nearest"});
+  },[safeIdx]);
 
   return(
     <>
@@ -3810,11 +4060,11 @@ function CommandPalette({projects,onClose,onOpen,onNewProject,onNewNote,onNewTod
           <input ref={inputRef} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search projects, commands…" style={{flex:1,background:"none",border:"none",outline:"none",fontSize:15,color:"var(--txt)",fontFamily:"'Syne'",fontWeight:500}} autoCorrect="off" autoCapitalize="none" spellCheck={false}/>
           <kbd style={{fontFamily:"'JetBrains Mono'",fontSize:10,padding:"2px 6px",border:"1px solid var(--border-md)",borderRadius:4,color:"var(--txt-faint)"}}>ESC</kbd>
         </div>
-        <div style={{maxHeight:"60vh",overflowY:"auto"}}>
+        <div ref={listRef} style={{maxHeight:"60vh",overflowY:"auto"}}>
           {matchedProjs.length>0&&<>
             <div style={{padding:"8px 16px 4px",fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",textTransform:"uppercase",letterSpacing:1}}>Projects</div>
-            {matchedProjs.map(p=>(
-              <div key={p.id} onClick={()=>onOpen(p,"overview")} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",cursor:"pointer",transition:"background .1s"}} onMouseEnter={e=>e.currentTarget.style.background="var(--accent-dim)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            {matchedProjs.map((p,i)=>(
+              <div key={p.id} data-idx={i} onClick={()=>onOpen(p,"overview")} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",cursor:"pointer",background:safeIdx===i?"var(--accent-dim)":"transparent",transition:"background .1s"}}>
                 <span style={{color:STATUS_CONFIG[p.status]?.color||"var(--txt-muted)",fontSize:9}}>●</span>
                 <span style={{flex:1,fontSize:14,color:"var(--txt)",fontFamily:"'Syne'",fontWeight:600}}>{p.name}</span>
                 <span style={{...s.mono10,color:"var(--txt-faint)"}}>{STATUS_CONFIG[p.status]?.label}</span>
@@ -3823,19 +4073,21 @@ function CommandPalette({projects,onClose,onOpen,onNewProject,onNewNote,onNewTod
           </>}
           {matchedCmds.length>0&&<>
             <div style={{padding:"8px 16px 4px",fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",textTransform:"uppercase",letterSpacing:1}}>Commands</div>
-            {matchedCmds.map((c,i)=>(
-              <div key={i} onClick={c.action} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",cursor:"pointer",transition:"background .1s"}} onMouseEnter={e=>e.currentTarget.style.background="var(--accent-dim)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            {matchedCmds.map((c,i)=>{const gi=matchedProjs.length+i;return(
+              <div key={i} data-idx={gi} onClick={c.action} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",cursor:"pointer",background:safeIdx===gi?"var(--accent-dim)":"transparent",transition:"background .1s"}}>
                 <span style={{color:"var(--accent)",fontSize:13,width:16,textAlign:"center",flexShrink:0}}>{c.icon}</span>
                 <span style={{flex:1,fontSize:14,color:"var(--txt)",fontFamily:"'Syne'",fontWeight:500}}>{c.label}</span>
               </div>
-            ))}
+            );})}
           </>}
-          {matchedProjs.length===0&&matchedCmds.length===0&&(
+          {allItems.length===0&&(
             <div style={{padding:"24px 16px",textAlign:"center",color:"var(--txt-faint)",fontSize:13,fontFamily:"'Syne'"}}>No results for "{q}"</div>
           )}
         </div>
-        <div style={{padding:"8px 16px",borderTop:"1px solid var(--border)",display:"flex",gap:12}}>
-          <span style={{...s.mono10,color:"var(--txt-faint)"}}>Ctrl+K to open · ? for shortcuts</span>
+        <div style={{padding:"8px 16px",borderTop:"1px solid var(--border)",display:"flex",gap:16,alignItems:"center"}}>
+          <span style={{...s.mono10,color:"var(--txt-faint)"}}>↑↓ navigate</span>
+          <span style={{...s.mono10,color:"var(--txt-faint)"}}>↵ select</span>
+          <span style={{...s.mono10,color:"var(--txt-faint)"}}>ESC close</span>
         </div>
       </div>
     </>
@@ -3843,9 +4095,169 @@ function CommandPalette({projects,onClose,onOpen,onNewProject,onNewNote,onNewTod
 }
 
 // ── Keyboard Shortcuts Modal ──────────────────────────────────────────────────
+// ── JotPad — floating quick note capture ─────────────────────────────────────
+function JotPad({projectName,onSave,onClose,value,onChange}){
+  const ref=useRef(null);
+  useEffect(()=>{ref.current?.focus();},[]);
+  return(
+    <>
+      <div style={{position:"fixed",inset:0,zIndex:3000}} onClick={onClose}/>
+      <div style={{position:"fixed",bottom:80,right:24,zIndex:3001,width:"min(400px,90vw)",background:"var(--bg-modal)",border:"1px solid var(--accent)",borderRadius:12,boxShadow:"0 8px 32px rgba(0,0,0,.4)",overflow:"hidden"}}>
+        <div style={{padding:"10px 14px 0",display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:12,color:"var(--accent-text)",fontFamily:"'Syne'",fontWeight:700,flex:1}}>📝 Note → {projectName}</span>
+          <kbd style={{fontFamily:"'JetBrains Mono'",fontSize:10,padding:"1px 5px",border:"1px solid var(--border-md)",borderRadius:3,color:"var(--txt-faint)"}}>Ctrl+J</kbd>
+        </div>
+        <QTextarea ref={ref} className="q-input" style={{border:"none",borderRadius:0,resize:"none",minHeight:100,margin:"8px 0 0",borderTop:"1px solid var(--border)"}} value={value} onChange={e=>onChange(e.target.value)} placeholder="Jot something down…" onKeyDown={e=>{if(e.key==="Enter"&&e.ctrlKey){e.preventDefault();onSave(value);}if(e.key==="Escape")onClose();}}/>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 14px",borderTop:"1px solid var(--border)"}}>
+          <span style={{...s.mono10,color:"var(--txt-faint)"}}>Ctrl+Enter to save · Esc to close</span>
+          <div style={{display:"flex",gap:6}}>
+            <button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:12}} onClick={onClose}>Discard</button>
+            <button className="q-btn-primary" style={{padding:"5px 12px",fontSize:12}} onClick={()=>onSave(value)} disabled={!value.trim()}>Save Note</button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Version Comparison Modal ──────────────────────────────────────────────────
+function VersionCompareModal({versions,onClose}){
+  const sorted=[...versions].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const [aId,setAId]=useState(sorted[0]?.id||"");
+  const [bId,setBId]=useState(sorted[1]?.id||"");
+  const vA=versions.find(v=>v.id===aId);
+  const vB=versions.find(v=>v.id===bId);
+  const diffLines=(a,b)=>{
+    if(!a&&!b)return[];
+    const aLines=(a||"").split("\n");
+    const bLines=(b||"").split("\n");
+    const all=new Set([...aLines,...bLines]);
+    return [...aLines.map(l=>({text:l,in:"a"})),...bLines.filter(l=>!aLines.includes(l)).map(l=>({text:l,in:"b"}))];
+  };
+  return(
+    <>
+      <div style={{position:"fixed",inset:0,background:"var(--overlay)",zIndex:1200}} onClick={onClose}/>
+      <div style={{...s.modalCentered,maxWidth:720,zIndex:1201}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <h2 style={s.modalTitle}>Version Comparison</h2>
+          <button className="q-btn-ghost" style={{padding:"6px 12px",fontSize:12}} onClick={onClose}>✕</button>
+        </div>
+        <div style={{display:"flex",gap:10,marginBottom:16}}>
+          <select className="q-input" style={{flex:1,marginTop:0}} value={aId} onChange={e=>setAId(e.target.value)}>
+            {sorted.map(v=><option key={v.id} value={v.id}>{v.version} — {new Date(v.date).toLocaleDateString()}</option>)}
+          </select>
+          <span style={{alignSelf:"center",color:"var(--txt-muted)",fontWeight:700}}>vs</span>
+          <select className="q-input" style={{flex:1,marginTop:0}} value={bId} onChange={e=>setBId(e.target.value)}>
+            {sorted.map(v=><option key={v.id} value={v.id}>{v.version} — {new Date(v.date).toLocaleDateString()}</option>)}
+          </select>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          {[{v:vA,label:"A"},{v:vB,label:"B"}].map(({v,label})=>(
+            <div key={label} style={{background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:8,padding:14}}>
+              <div style={{fontFamily:"'Syne'",fontWeight:700,fontSize:14,color:"var(--accent-text)",marginBottom:6}}>{v?.version||"—"} <span style={{fontSize:11,color:"var(--txt-muted)",fontWeight:400}}>{v?new Date(v.date).toLocaleDateString():""}</span></div>
+              <div style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--txt-sub)",lineHeight:1.7,whiteSpace:"pre-wrap",minHeight:80}}>{v?.releaseNotes||<span style={{color:"var(--txt-faint)",fontStyle:"italic"}}>No release notes</span>}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Weekly Summary Generator ──────────────────────────────────────────────────
+function generateWeeklySummary(projects){
+  const now=new Date();
+  const weekAgo=new Date(now-7*24*60*60*1000);
+  const fmt=d=>new Date(d).toLocaleDateString("en-US",{month:"short",day:"numeric"});
+  let md=`# Weekly Summary\n${fmt(weekAgo)} – ${fmt(now)}\n\n`;
+  let totalTodos=0,totalNotes=0,totalIssues=0,totalVersions=0;
+  projects.filter(p=>p.status!=="archived").forEach(p=>{
+    const todos=(p.todos||[]).filter(t=>t.completed&&t.completedAt&&new Date(t.completedAt)>=weekAgo);
+    const notes=(p.notes||[]).filter(n=>new Date(n.createdAt)>=weekAgo);
+    const issues=(p.issues||[]).filter(i=>i.status==="fixed"&&i.fixedAt&&new Date(i.fixedAt)>=weekAgo);
+    const versions=(p.versions||[]).filter(v=>new Date(v.date)>=weekAgo);
+    if(!todos.length&&!notes.length&&!issues.length&&!versions.length)return;
+    md+=`## ${p.name}\n`;
+    if(versions.length){md+=`**Releases:** ${versions.map(v=>v.version).join(", ")}\n`;}
+    if(todos.length){md+=`**Completed (${todos.length}):**\n`;todos.forEach(t=>{md+=`- ${t.text}\n`;});totalTodos+=todos.length;}
+    if(issues.length){md+=`**Fixed Issues (${issues.length}):**\n`;issues.forEach(i=>{md+=`- ${i.title}\n`;});totalIssues+=issues.length;}
+    if(notes.length){md+=`**Notes added:** ${notes.length}\n`;totalNotes+=notes.length;}
+    md+="\n";
+  });
+  md+=`---\n**Totals:** ${totalTodos} todos · ${totalIssues} issues fixed · ${totalVersions} releases · ${totalNotes} notes\n`;
+  return md;
+}
+
+// ── Build Size Trend Chart (SVG) ──────────────────────────────────────────────
+function BuildSizeTrendChart({buildLogs}){
+  const logs=[...buildLogs].filter(b=>b.buildSize&&b.builtAt)
+    .sort((a,b)=>new Date(a.builtAt)-new Date(b.builtAt))
+    .slice(-12);
+  if(logs.length<2)return<div style={{...s.empty,padding:"20px 0"}}><p>Need at least 2 builds with size data to show trend.</p></div>;
+  const sizes=logs.map(b=>{const m=b.buildSize.match(/[\d.]+/);return m?parseFloat(m[0]):0;});
+  const max=Math.max(...sizes);const min=Math.min(...sizes);
+  const W=420,H=120,pad=30;
+  const x=i=>pad+(i/(logs.length-1))*(W-pad*2);
+  const y=v=>H-pad-((v-min)/(max-min||1))*(H-pad*2);
+  const path=sizes.map((v,i)=>`${i===0?"M":"L"}${x(i)},${y(v)}`).join(" ");
+  return(
+    <div style={{marginTop:16}}>
+      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Build Size Trend</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{overflow:"visible"}}>
+        <path d={path} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round"/>
+        {sizes.map((v,i)=>(
+          <g key={i}>
+            <circle cx={x(i)} cy={y(v)} r="4" fill="var(--accent)"/>
+            <text x={x(i)} y={y(v)-8} textAnchor="middle" fontSize="9" fill="var(--txt-muted)">{logs[i].buildSize}</text>
+            <text x={x(i)} y={H-4} textAnchor="middle" fontSize="8" fill="var(--txt-dim)">{new Date(logs[i].builtAt).toLocaleDateString([],{month:"numeric",day:"numeric"})}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+// ── Burndown Chart (SVG) ──────────────────────────────────────────────────────
+function BurndownChart({project}){
+  const todos=project.todos||[];
+  const milestones=project.milestones||[];
+  if(!todos.length)return null;
+  // Build completion history from completedAt timestamps
+  const completedWithDate=todos.filter(t=>t.completed&&t.completedAt).sort((a,b)=>new Date(a.completedAt)-new Date(b.completedAt));
+  if(completedWithDate.length<2)return null;
+  const start=new Date(completedWithDate[0].completedAt);
+  const end=new Date(completedWithDate[completedWithDate.length-1].completedAt);
+  const total=todos.length;
+  // Sample 10 points across the date range
+  const points=[];
+  for(let i=0;i<=9;i++){
+    const t=new Date(start.getTime()+(end.getTime()-start.getTime())*(i/9));
+    const done=todos.filter(td=>td.completed&&td.completedAt&&new Date(td.completedAt)<=t).length;
+    points.push({date:t,done,remaining:total-done});
+  }
+  const W=420,H=110,pad=30;
+  const x=i=>pad+(i/9)*(W-pad*2);
+  const y=v=>H-pad-(v/total)*(H-pad*2);
+  const actualPath=points.map((p,i)=>`${i===0?"M":"L"}${x(i)},${y(p.done)}`).join(" ");
+  const idealPath=`M${x(0)},${y(0)} L${x(9)},${y(total)}`;
+  return(
+    <div style={{marginTop:16}}>
+      <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Burndown — {completedWithDate.length} of {total} complete</div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{overflow:"visible"}}>
+        <path d={idealPath} fill="none" stroke="var(--border-md)" strokeWidth="1" strokeDasharray="4,3"/>
+        <path d={actualPath} fill="none" stroke="#4ADE80" strokeWidth="2" strokeLinejoin="round"/>
+        {points.map((p,i)=><circle key={i} cx={x(i)} cy={y(p.done)} r="3" fill="#4ADE80"/>)}
+        <text x={W-pad} y={pad-6} fontSize="9" fill="var(--txt-muted)" textAnchor="end">Ideal</text>
+        <text x={W-pad} y={y(points[9].done)-6} fontSize="9" fill="#4ADE80" textAnchor="end">Actual</text>
+      </svg>
+    </div>
+  );
+}
+
 function ShortcutsModal({onCancel}){
   const shortcuts=[
     {key:"Ctrl+K",        desc:"Open command palette"},
+    {key:"Ctrl+J",        desc:"Quick note jot pad (current project)"},
     {key:"?",             desc:"Show this shortcuts panel"},
     {key:"F5",            desc:"Force refresh data"},
     {key:"Ctrl+Enter",    desc:"Submit open modal / post comment"},
