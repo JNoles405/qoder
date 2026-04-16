@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.8.3";
+const APP_VER    = "v0.8.5";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -803,6 +803,15 @@ export default function QoderApp() {
   const [view,        setView]        = useState("dashboard");
   const [selProj,     setSelProj]     = useState(null);
   const [projTab,     setProjTab]     = useState("overview");
+
+  // ── Pomodoro state lifted to App level so tab switching doesn't reset it ────
+  const POM_WORK=25*60,POM_BREAK=5*60,POM_LONG_BREAK=15*60;
+  const [pomMode,setPomMode]=useState("work");
+  const [pomSecs,setPomSecs]=useState(25*60);
+  const [pomActive,setPomActive]=useState(false);
+  const [pomSession,setPomSession]=useState(null);
+  const [pomCycles,setPomCycles]=useState(0);
+  const pomEndTimeRef=useRef(null);
   const [modal,       setModal]       = useState(null);
   const [form,        setForm]        = useState({});
   const [search,      setSearch]      = useState("");
@@ -1034,6 +1043,27 @@ export default function QoderApp() {
       });
     }catch(e){showToast("Settings saved locally — sync failed","info");}
   };
+
+  // ── App-level Pomodoro countdown (survives tab switches) ────────────────────
+  useEffect(()=>{
+    if(!pomActive){pomEndTimeRef.current=null;return;}
+    if(!pomEndTimeRef.current) pomEndTimeRef.current=Date.now()+(pomSecs*1000);
+    const iv=setInterval(()=>{
+      const remaining=Math.round((pomEndTimeRef.current-Date.now())/1000);
+      if(remaining<=0){
+        clearInterval(iv);pomEndTimeRef.current=null;
+        if(pomMode==="work"){
+          const newCycles=pomCycles+1;setPomCycles(newCycles);
+          const breakLen=newCycles%4===0?POM_LONG_BREAK:POM_BREAK;
+          setPomMode("break");setPomSecs(breakLen);
+          if(pomSession&&selProj){stopTimer(selProj.id,pomSession,`Pomodoro #${newCycles} completed`);setPomSession(null);}
+          try{new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAA").play();}catch{}
+        } else {setPomMode("work");setPomSecs(POM_WORK);}
+        setPomActive(false);
+      } else {setPomSecs(remaining);}
+    },500);
+    return()=>clearInterval(iv);
+  },[pomActive]);
 
   // ── Milestone due date reminders ─────────────────────────────────────────────
   useEffect(()=>{
@@ -1475,6 +1505,13 @@ export default function QoderApp() {
       const row=await sb.post(cfg.url,cfg.key,T(),"build_logs",{project_id:pid,version_id:b.versionId||null,platform:b.platform||"android",build_number:b.buildNumber||null,build_size:b.buildSize||null,status:b.status||"building",store:b.store||null,notes:b.notes||null,built_at:b.builtAt||new Date().toISOString()});
       mutate(pid,p=>({...p,buildLogs:[{id:row.id,versionId:row.version_id,platform:row.platform,buildNumber:row.build_number,buildSize:row.build_size,status:row.status,store:row.store,notes:row.notes,builtAt:row.built_at,createdAt:row.created_at},...p.buildLogs]}));
       showToast("Build logged");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const updateBuildLog=async(pid,bid,b)=>{
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"build_logs",bid,{platform:b.platform||"android",build_number:b.buildNumber||null,build_size:b.buildSize||null,status:b.status||"building",store:b.store||null,notes:b.notes||null,version_id:b.versionId||null});
+      mutate(pid,p=>({...p,buildLogs:p.buildLogs.map(x=>x.id===bid?{...x,platform:b.platform,buildNumber:b.buildNumber,buildSize:b.buildSize,status:b.status,store:b.store,notes:b.notes,versionId:b.versionId}:x)}));
+      showToast("Build updated");
     }catch(e){showToast(e.message,"err");}
   };
   const updateBuildStatus=async(pid,bid,status)=>{try{await sb.patch(cfg.url,cfg.key,T(),"build_logs",bid,{status});mutate(pid,p=>({...p,buildLogs:p.buildLogs.map(b=>b.id===bid?{...b,status}:b)}));}catch(e){showToast(e.message,"err");}};
@@ -1973,6 +2010,11 @@ export default function QoderApp() {
             onAssignTodoToSprint={(tid,sid)=>assignTodoToSprint(liveProj.id,tid,sid)}
             onStartTimer={()=>startTimer(liveProj.id)}
             onStopTimer={(sid,note)=>stopTimer(liveProj.id,sid,note)}
+            pomMode={pomMode} setPomMode={setPomMode}
+            pomSecs={pomSecs} setPomSecs={setPomSecs}
+            pomActive={pomActive} setPomActive={setPomActive}
+            pomSession={pomSession} setPomSession={setPomSession}
+            pomCycles={pomCycles} setPomCycles={setPomCycles}
             onDeleteTimeSession={sid=>deleteTimeSession(liveProj.id,sid)}
             onAddAsset={()=>openModal("add-asset",{type:"Link"})}
             onEditAsset={asset=>openModal("edit-asset",{...asset})}
@@ -1988,6 +2030,7 @@ export default function QoderApp() {
             onDeleteIssueComment={(iid,cid)=>deleteIssueComment(liveProj.id,iid,cid)}
             onPublishRelease={(tag,name,body,token,draft)=>publishRelease(liveProj.id,tag,name,body,token,draft)}
             onAddBuildLog={()=>openModal("add-build",{platform:"android",status:"building",versionId:liveProj.versions?.[0]?.id||""})}
+            onEditBuildLog={b=>openModal("edit-build",{...b,id:b.id})}
             onUpdateBuildStatus={(bid,st)=>updateBuildStatus(liveProj.id,bid,st)}
             onDeleteBuildLog={bid=>deleteBuildLog(liveProj.id,bid)}
             onAddEnvironment={()=>openModal("add-env",{color:"#4ADE80",variables:[]})}
@@ -2064,6 +2107,7 @@ export default function QoderApp() {
         {modal==="add-group"    &&<GroupForm     data={form} setData={setForm} onSubmit={d=>{addGroup(d.name,d.color);closeModal();}} onCancel={closeModal}/>}
         {modal==="add-sprint"   &&<SprintForm    data={form} setData={setForm} onSubmit={d=>{addSprint(selProj.id,d);closeModal();}}                             onCancel={closeModal}/>}
         {modal==="add-build"    &&<BuildLogForm  data={form} setData={setForm} versions={selProj?.versions||[]} onSubmit={d=>{addBuildLog(selProj.id,d);closeModal();}}         onCancel={closeModal}/>}
+        {modal==="edit-build"   &&<BuildLogForm  data={form} setData={setForm} versions={selProj?.versions||[]} title="Edit Build" onSubmit={d=>{updateBuildLog(selProj.id,d.id,d);closeModal();}} onCancel={closeModal}/>}
         {modal==="add-snippet"   &&<SnippetForm   data={form} setData={setForm} onSubmit={d=>{addSnippet(selProj.id,d);closeModal();}}                          onCancel={closeModal}/>}
         {modal==="edit-snippet"  &&<SnippetForm   data={form} setData={setForm} isEdit onSubmit={d=>{updateSnippet(selProj.id,d.id,d);closeModal();}}             onCancel={closeModal}/>}
         {modal==="add-env"      &&<EnvironmentForm data={form} setData={setForm} title="Add Environment" onSubmit={d=>{addEnvironment(selProj.id,d);closeModal();}}      onCancel={closeModal}/>}
@@ -2334,7 +2378,7 @@ function ScrollableTabBar({children,isMobile}){
 }
 
 // ── ProjectView ───────────────────────────────────────────────────────────────
-function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,onAddAsset,onDeleteAsset,onUploadAssetFile,onEditAsset,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo}){
+function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,pomMode,setPomMode,pomSecs,setPomSecs,pomActive,setPomActive,pomSession,setPomSession,pomCycles,setPomCycles,onAddAsset,onDeleteAsset,onUploadAssetFile,onEditAsset,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onEditBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
@@ -2455,11 +2499,11 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
       {tab==="sprints"    &&<SprintsTab    project={project} onAdd={onAddSprint} onUpdateStatus={onUpdateSprintStatus} onDelete={onDeleteSprint} onAssignTodo={onAssignTodoToSprint}/>}
       {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates||[]} onApplyChecklist={onApplyChecklist} onSaveAsTemplate={onSaveAsTemplate} onDragTodo={onDragTodo}/>}
       {tab==="snippets"   &&<SnippetsTab   project={project} onAdd={onAddSnippet} onEdit={onEditSnippet} onDelete={onDeleteSnippet}/>}
-      {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession}/>}
+      {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession} pomMode={pomMode} setPomMode={setPomMode} pomSecs={pomSecs} setPomSecs={setPomSecs} pomActive={pomActive} setPomActive={setPomActive} pomSession={pomSession} setPomSession={setPomSession} pomCycles={pomCycles} setPomCycles={setPomCycles}/>}
       {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes} onPin={onPinNote}/>}
-      {tab==="assets"     &&<AssetsTab     project={project} onAdd={onAddAsset}     onDelete={onDeleteAsset}    onUploadFile={onUploadAssetFile} onLightbox={onLightbox}/>}
+      {tab==="assets"     &&<AssetsTab     project={project} onAdd={onAddAsset}     onDelete={onDeleteAsset}    onUploadFile={onUploadAssetFile} onEdit={onEditAsset} onLightbox={onLightbox}/>}
       {tab==="issues"     &&<IssuesTab     project={project} onAdd={onAddIssue}     onFix={onFixIssue}         onDelete={onDeleteIssue}  onUpdatePriority={onUpdateIssuePriority} onUploadScreenshot={onUploadIssueScreenshot} onRemoveScreenshot={onRemoveIssueScreenshot} onAddComment={onAddIssueComment} onDeleteComment={onDeleteIssueComment} onLightbox={onLightbox}/>}
-      {tab==="build-log"  &&<BuildLogTab   project={project} onAdd={onAddBuildLog}   onUpdateStatus={onUpdateBuildStatus} onDelete={onDeleteBuildLog}/>}
+      {tab==="build-log"  &&<BuildLogTab   project={project} onAdd={onAddBuildLog}   onEdit={onEditBuildLog} onUpdateStatus={onUpdateBuildStatus} onDelete={onDeleteBuildLog}/>}
       {tab==="environments"&&<EnvironmentsTab project={project} onAdd={onAddEnvironment} onEdit={onEditEnvironment} onDelete={onDeleteEnvironment}/>}
       {tab==="dependencies"&&<DependenciesTab project={project} onAdd={onAddDependency} onUpdateStatus={onUpdateDepStatus} onDelete={onDeleteDependency}/>}
       {tab==="ideas"      &&<IdeasTab      project={project} onAdd={onAddIdea}      onEdit={onEditIdea}        onPin={onToggleIdeaPin}    onDelete={onDeleteIdea}    onReorder={onReorderIdeas}/>}
@@ -3102,59 +3146,27 @@ function SprintsTab({project,onAdd,onUpdateStatus,onDelete,onAssignTodo}){
 }
 
 // ── Time Tab ──────────────────────────────────────────────────────────────────
-function TimeTab({project,onStart,onStop,onDelete}){
+function TimeTab({project,onStart,onStop,onDelete,pomMode,setPomMode,pomSecs,setPomSecs,pomActive,setPomActive,pomSession,setPomSession,pomCycles,setPomCycles}){
+  const POM_WORK=25*60,POM_BREAK=5*60,POM_LONG_BREAK=15*60;
   const sessions=project.timeSessions||[];
   const [running,setRunning]=useState(null);
   const [elapsed,setElapsed]=useState(0);
   const [stopNote,setStopNote]=useState("");
   const [view,setView]=useState("timer"); // "timer"|"pomodoro"
-  // Pomodoro state
-  const [pomMode,setPomMode]=useState("work"); // "work"|"break"
-  const [pomSecs,setPomSecs]=useState(25*60);
-  const [pomActive,setPomActive]=useState(false);
-  const [pomSession,setPomSession]=useState(null); // open time_session id for current pomodoro
-  const [pomCycles,setPomCycles]=useState(0);
-  const POM_WORK=25*60,POM_BREAK=5*60,POM_LONG_BREAK=15*60;
 
   const openSession=sessions.find(s=>!s.endedAt);
   useEffect(()=>{if(openSession){setRunning({id:openSession.id,startedAt:openSession.startedAt});}else{setRunning(null);setElapsed(0);};},[openSession?.id]);
   useEffect(()=>{if(!running)return;const iv=setInterval(()=>setElapsed(Math.round((Date.now()-new Date(running.startedAt))/1000)),500);return()=>clearInterval(iv);},[running]);
 
-  // Pomodoro countdown — uses wall clock so tab switching doesn't pause it
-  const pomEndTimeRef=useRef(null);
-  useEffect(()=>{
-    if(!pomActive){pomEndTimeRef.current=null;return;}
-    // Set the target end time based on current pomSecs
-    if(!pomEndTimeRef.current){
-      pomEndTimeRef.current=Date.now()+(pomSecs*1000);
-    }
-    const iv=setInterval(()=>{
-      const remaining=Math.round((pomEndTimeRef.current-Date.now())/1000);
-      if(remaining<=0){
-        clearInterval(iv);
-        pomEndTimeRef.current=null;
-        if(pomMode==="work"){
-          const newCycles=pomCycles+1;setPomCycles(newCycles);
-          const breakLen=newCycles%4===0?POM_LONG_BREAK:POM_BREAK;
-          setPomMode("break");setPomSecs(breakLen);
-          if(pomSession){onStop(pomSession,`Pomodoro #${newCycles} completed`);setPomSession(null);}
-          try{new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAA").play();}catch{}
-        } else {
-          setPomMode("work");setPomSecs(POM_WORK);
-        }
-        setPomActive(false);
-      } else {
-        setPomSecs(remaining);
-      }
-    },500); // poll at 500ms for responsiveness
-    return()=>clearInterval(iv);
-  },[pomActive]);
-
   const startPomodoro=async()=>{
-    if(pomMode==="work"){const sess=await onStart();if(sess)setPomSession(sess.id);}
+    // If there's already a regular timer running, let it keep running — start pomodoro as a separate session
+    if(pomMode==="work"){
+      const sess=await onStart();
+      if(sess)setPomSession(sess.id);
+    }
     setPomActive(true);
   };
-  const pausePomodoro=()=>setPomActive(false);
+  const pausePomodoro=()=>{setPomActive(false);};
   const resetPomodoro=()=>{setPomActive(false);setPomMode("work");setPomSecs(POM_WORK);if(pomSession){onStop(pomSession,"Pomodoro cancelled");setPomSession(null);}};
 
   const totalSeconds=sessions.filter(s=>s.durationSeconds).reduce((a,s)=>a+s.durationSeconds,0);
@@ -3180,6 +3192,12 @@ function TimeTab({project,onStart,onStop,onDelete}){
         </div>
       </div>
 
+      {running&&pomActive&&pomMode==="work"&&(
+        <div style={{padding:"8px 14px",marginBottom:8,background:"rgba(0,212,255,.06)",border:"1px solid rgba(0,212,255,.2)",borderRadius:8,display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--accent)"}}>⏱ Both timers running simultaneously</span>
+          <span style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--txt-sub)",marginLeft:"auto"}}>{Math.floor(elapsed/3600)>0?Math.floor(elapsed/3600)+"h ":""}{Math.floor((elapsed%3600)/60)}m {elapsed%60}s</span>
+        </div>
+      )}
       {view==="timer"&&(
         <div className="q-ver-card" style={{marginBottom:20,borderLeft:`3px solid ${running?"#4ADE80":"var(--border-md)"}`}}>
           <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
@@ -3391,7 +3409,7 @@ function SprintForm({data,setData,onSubmit,onCancel}){
 }
 
 // ── Build Log Tab ─────────────────────────────────────────────────────────────
-function BuildLogTab({project,onAdd,onUpdateStatus,onDelete}){
+function BuildLogTab({project,onAdd,onEdit,onUpdateStatus,onDelete}){
   const builds=project.buildLogs||[];
   const verMap=Object.fromEntries((project.versions||[]).map(v=>[v.id,v.version]));
   return(
@@ -3408,7 +3426,8 @@ function BuildLogTab({project,onAdd,onUpdateStatus,onDelete}){
                   {b.buildSize&&<span style={s.mono10}>{b.buildSize}</span>}
                   {verMap[b.versionId]&&<span style={s.mono10}>→ {verMap[b.versionId]}</span>}
                 </div>
-                <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this build log?"))onDelete(b.id);}}>✕</button>
+                <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit&&onEdit({...b})}>Edit</button>
+              <button className="q-del" onClick={async()=>{if(await qConfirm("Remove this build log?"))onDelete(b.id);}}>✕</button>
               </div>
               <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:b.notes?10:0}}>
                 {Object.entries(BUILD_STATUSES).map(([k,v])=>(
@@ -3845,12 +3864,12 @@ function ConceptForm({data,setData,cfg,session,projectId,onSubmit,onUploadFile,o
   return(<div><h2 style={s.modalTitle}>Add Concept</h2><Field label="Type"><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>{CONCEPT_TYPES.map(t=><button key={t} className={`q-chip${data.type===t?" q-chip-on":""}`} onClick={()=>set("type",t)}>{CONCEPT_ICONS[t]} {t}</button>)}</div></Field><Field label="Label (optional)"><QInput className="q-input" value={data.label||""} onChange={e=>set("label",e.target.value)} placeholder="Name this concept…"/></Field><Field label="Content">{renderInput()}</Field><p style={{fontSize:12,color:"var(--txt-muted)",marginTop:4}}>Concepts don't appear on Overview.</p><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Add Concept"/></div>);
 }
 
-function BuildLogForm({data,setData,versions,onSubmit,onCancel}){
+function BuildLogForm({data,setData,versions,onSubmit,onCancel,title="Log Build"}){
   const set=(k,v)=>setData(d=>({...d,[k]:v}));
   const today=new Date().toISOString();
   return(
     <div>
-      <h2 style={s.modalTitle}>Log Build</h2>
+      <h2 style={s.modalTitle}>{title}</h2>
       <Field label="Platform">
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
           {BUILD_PLATFORMS.map(p=><button key={p} className={`q-chip${data.platform===p?" q-chip-on":""}`} onClick={()=>set("platform",p)} style={{textTransform:"capitalize"}}>{p}</button>)}
