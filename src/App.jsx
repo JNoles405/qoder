@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.6.7";
+const APP_VER    = "v0.6.8";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -1030,14 +1030,37 @@ export default function QoderApp() {
     catch(e){showToast(e.message,"err");}
   };
   const archiveProject=async(pid)=>{
-    // Export snapshot first, then set status to archived
     const proj=projects.find(p=>p.id===pid);
     if(!proj)return;
-    exportProjectJSON(proj); // triggers download
+    exportProjectJSON(proj);
     try{
       await sb.patch(cfg.url,cfg.key,T(),"projects",pid,{status:"archived"});
       mutate(pid,p=>({...p,status:"archived"}));
       showToast("Project archived — export downloaded");
+    }catch(e){showToast(e.message,"err");}
+  };
+
+  const unarchiveProject=async(pid)=>{
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"projects",pid,{status:"planning"});
+      mutate(pid,p=>({...p,status:"planning"}));
+      showToast("Project restored to Planning");
+    }catch(e){showToast(e.message,"err");}
+  };
+
+  const cloneTodosToProject=async(sourcePid,targetPid,todoIds)=>{
+    const sourceTodos=projects.find(p=>p.id===sourcePid)?.todos||[];
+    const todosToClone=todoIds.length>0?sourceTodos.filter(t=>todoIds.includes(t.id)):sourceTodos.filter(t=>!t.completed);
+    if(!todosToClone.length)return showToast("No todos to clone","err");
+    try{
+      let cloned=0;
+      for(const t of todosToClone){
+        const position=(projects.find(p=>p.id===targetPid)?.todos?.length||0)+cloned;
+        const row=await sb.post(cfg.url,cfg.key,T(),"todos",{project_id:targetPid,text:t.text,completed:false,priority:t.priority,recurring:t.recurring||false,recurrence_type:t.recurrenceType||null,position});
+        mutate(targetPid,p=>({...p,todos:[...p.todos,{id:row.id,text:row.text,completed:false,completedAt:null,priority:row.priority||"medium",recurring:row.recurring||false,recurrenceType:row.recurrence_type||null,sprintId:null,position:row.position,createdAt:row.created_at}]}));
+        cloned++;
+      }
+      showToast(`${cloned} todo${cloned!==1?"s":""} cloned`);
     }catch(e){showToast(e.message,"err");}
   };
 
@@ -1445,12 +1468,24 @@ export default function QoderApp() {
           </div>
           <nav style={s.nav}>
             <NavBtn active={view==="dashboard"} onClick={()=>{setView("dashboard");if(isMobile)setSidebarOpen(false);}} icon="◈" label="Dashboard"/>
-            {projects.length>0&&<>
-              <div style={s.navSection}>Projects</div>
-              <DraggableSidebarList items={projects} onReorder={reorderProjects}>
-                {p=><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/>}
-              </DraggableSidebarList>
-            </>}
+            {projects.length>0&&(()=>{
+              const active=projects.filter(p=>p.status!=="archived");
+              const archived=projects.filter(p=>p.status==="archived");
+              return(<>
+                <div style={s.navSection}>Projects</div>
+                <DraggableSidebarList items={active} onReorder={reorderProjects}>
+                  {p=><NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:STATUS_CONFIG[p.status]?.color,fontSize:9}}>●</span>} label={p.name} folder={p.localFolder} projectColor={p.color||null} small/>}
+                </DraggableSidebarList>
+                {archived.length>0&&<>
+                  <div style={{...s.navSection,marginTop:8,opacity:.5}}>Archived</div>
+                  {archived.map(p=>(
+                    <div key={p.id} style={{opacity:.45,fontStyle:"italic"}}>
+                      <NavBtn active={selProj?.id===p.id&&view==="project"} onClick={()=>openProject(p)} icon={<span style={{color:"var(--txt-dim)",fontSize:9}}>▣</span>} label={p.name} folder={p.localFolder} projectColor={null} small/>
+                    </div>
+                  ))}
+                </>}
+              </>);
+            })()}
           </nav>
           <div style={s.sidebarFoot}>
             <button className="q-btn-new" onClick={()=>{openModal("add-project",{status:"planning",techStack:[],tagIds:[]});if(isMobile)setSidebarOpen(false);}}>+ New Project</button>
@@ -1531,6 +1566,9 @@ export default function QoderApp() {
             onEdit={()=>openModal("edit-project",{...liveProj,tagIds:liveProj.tagIds||[],color:liveProj.color||null})}
             onDelete={async()=>{if(await qConfirm("Delete this project? This cannot be undone."))deleteProject(liveProj.id);}}
             onArchive={async()=>{if(await qConfirm("Archive this project? A JSON export will be downloaded first."))archiveProject(liveProj.id);}}
+            onUnarchive={async()=>{if(await qConfirm("Restore this project to Planning?"))unarchiveProject(liveProj.id);}}
+            onCloneTodos={(targetPid,ids)=>cloneTodosToProject(liveProj.id,targetPid,ids)}
+            allProjects={projects}
             onChangelog={()=>openModal("changelog",{})}
             userTags={userTags}
             githubData={ghCache[liveProj.id]||null}
@@ -1823,7 +1861,7 @@ function ScrollableTabBar({children,isMobile}){
 }
 
 // ── ProjectView ───────────────────────────────────────────────────────────────
-function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onDelete}){
+function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onCloneTodos,onDelete,allProjects}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
@@ -1894,6 +1932,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
           <button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12}} onClick={onChangelog}>Changelog</button>
           <button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12}} onClick={onEdit}>Edit</button>
           {project.status!=="archived"&&<button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12,color:"var(--txt-muted)"}} onClick={onArchive}>Archive</button>}
+          {project.status==="archived"&&<button className="q-btn-ghost" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12,color:"#4ADE80",borderColor:"rgba(74,222,128,.3)"}} onClick={onUnarchive}>Restore</button>}
           <button className="q-btn-danger" style={{padding:isMobile?"7px 11px":"7px 11px",fontSize:12}} onClick={onDelete}>Delete</button>
         </div>
       </div>
@@ -1908,7 +1947,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
       {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion} onDelete={onDeleteVersion} onChangelog={onChangelog}/>}
       {tab==="milestones" &&<MilestonesTab project={project} onAdd={onAddMilestone} onToggle={onToggleMilestone} onDelete={onDeleteMilestone}/>}
       {tab==="sprints"    &&<SprintsTab    project={project} onAdd={onAddSprint} onUpdateStatus={onUpdateSprintStatus} onDelete={onDeleteSprint} onAssignTodo={onAssignTodoToSprint}/>}
-      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint}/>}
+      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos}/>}
       {tab==="snippets"   &&<SnippetsTab   project={project} onAdd={onAddSnippet} onEdit={onEditSnippet} onDelete={onDeleteSnippet}/>}
       {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession}/>}
       {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes}/>}
@@ -2029,19 +2068,45 @@ function MilestonesTab({project,onAdd,onToggle,onDelete}){
 }
 
 // ── Todo Tab ──────────────────────────────────────────────────────────────────
-function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSprint}){
+function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSprint,allProjects,onCloneTodos}){
   const [newText,setNewText]=useState("");
   const [newPriority,setNewPriority]=useState("medium");
   const [newRecurring,setNewRecurring]=useState(false);
   const [newRecType,setNewRecType]=useState("weekly");
+  const [showClone,setShowClone]=useState(false);
+  const [cloneTarget,setCloneTarget]=useState("");
   const todos=project.todos||[];
   const pending=todos.filter(t=>!t.completed).sort((a,b)=>{const o=["critical","high","medium","low"];return o.indexOf(a.priority||"medium")-o.indexOf(b.priority||"medium");});
   const done=todos.filter(t=>t.completed);
   const activeSprints=(sprints||[]).filter(sp=>sp.status==="active");
+  const otherProjects=(allProjects||[]).filter(p=>p.id!==project.id&&p.status!=="archived");
   const handleAdd=()=>{const t=newText.trim();if(!t)return;onAdd(t,newPriority,newRecurring,newRecurring?newRecType:null);setNewText("");};
+  const handleClone=async()=>{
+    if(!cloneTarget)return;
+    await onCloneTodos(cloneTarget,[]);
+    setShowClone(false);setCloneTarget("");
+  };
   return(
     <div>
-      <div style={s.tabBar}><span style={s.mono12}>{done.length}/{todos.length} completed</span></div>
+      <div style={s.tabBar}>
+        <span style={s.mono12}>{done.length}/{todos.length} completed</span>
+        {otherProjects.length>0&&(
+          <button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12}} onClick={()=>setShowClone(v=>!v)}>
+            Clone to Project…
+          </button>
+        )}
+      </div>
+      {showClone&&(
+        <div style={{display:"flex",gap:8,marginBottom:14,padding:"12px 14px",background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:8,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontSize:13,color:"var(--txt-muted)",flexShrink:0}}>Clone all open todos to:</span>
+          <select className="q-input" style={{flex:1,minWidth:160,marginTop:0,fontSize:13}} value={cloneTarget} onChange={e=>setCloneTarget(e.target.value)}>
+            <option value="">Select project…</option>
+            {otherProjects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <button className="q-btn-primary" style={{padding:"8px 16px",fontSize:12,flexShrink:0}} disabled={!cloneTarget} onClick={handleClone}>Clone</button>
+          <button className="q-btn-ghost" style={{padding:"8px 12px",fontSize:12,flexShrink:0}} onClick={()=>{setShowClone(false);setCloneTarget("");}}>Cancel</button>
+        </div>
+      )}
       <div style={{display:"flex",gap:8,marginBottom:6,flexWrap:"wrap"}}>
         <QInput className="q-input" style={{flex:1,minWidth:180,marginTop:0}} value={newText} onChange={e=>setNewText(e.target.value)} placeholder="Add a to-do…" onKeyDown={e=>e.key==="Enter"&&handleAdd()}/>
         <select className="q-input" style={{width:130,marginTop:0}} value={newPriority} onChange={e=>setNewPriority(e.target.value)}>
