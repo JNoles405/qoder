@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.7.5";
+const APP_VER    = "v0.7.7";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -1925,6 +1925,10 @@ export default function QoderApp() {
             onUnarchive={async()=>{if(await qConfirm("Restore this project to Planning?"))unarchiveProject(liveProj.id);}}
             onDuplicate={()=>duplicateProject(liveProj.id)}
             onCloneTodos={(targetPid,ids)=>cloneTodosToProject(liveProj.id,targetPid,ids)}
+            checklistTemplates={checklistTemplates}
+            onApplyChecklist={(tid)=>applyChecklistTemplate(liveProj.id,tid)}
+            onSaveAsTemplate={(name,items)=>saveChecklistTemplate(name,items)}
+            onDragTodo={(todo)=>setDraggedTodo({todo,sourcePid:liveProj.id})}
             allProjects={projects}
             onChangelog={()=>openModal("changelog",{})}
             userTags={userTags}
@@ -2234,7 +2238,7 @@ function ScrollableTabBar({children,isMobile}){
 }
 
 // ── ProjectView ───────────────────────────────────────────────────────────────
-function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare}){
+function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,onAddAsset,onDeleteAsset,onUploadAssetFile,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
@@ -2322,7 +2326,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
       {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion} onDelete={onDeleteVersion} onChangelog={onChangelog}/>}
       {tab==="milestones" &&<MilestonesTab project={project} onAdd={onAddMilestone} onToggle={onToggleMilestone} onDelete={onDeleteMilestone}/>}
       {tab==="sprints"    &&<SprintsTab    project={project} onAdd={onAddSprint} onUpdateStatus={onUpdateSprintStatus} onDelete={onDeleteSprint} onAssignTodo={onAssignTodoToSprint}/>}
-      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates} onApplyChecklist={(tid)=>applyChecklistTemplate(liveProj.id,tid)} onSaveAsTemplate={(name,items)=>saveChecklistTemplate(name,items)} onDragTodo={(todo)=>setDraggedTodo({todo,sourcePid:liveProj.id})}/>}
+      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates||[]} onApplyChecklist={onApplyChecklist} onSaveAsTemplate={onSaveAsTemplate} onDragTodo={onDragTodo}/>}
       {tab==="snippets"   &&<SnippetsTab   project={project} onAdd={onAddSnippet} onEdit={onEditSnippet} onDelete={onDeleteSnippet}/>}
       {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession}/>}
       {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes}/>}
@@ -2595,8 +2599,9 @@ function NotesTab({project,onAdd,onEdit,onDelete,onReorder,onPin}){
   const unpinned=notes.filter(n=>!n.pinned);
   const filtered=search.trim()?notes.filter(n=>n.content.toLowerCase().includes(search.toLowerCase())):null;
   const isSearching=!!search.trim();
-  const NoteCard=({note,draggable=false})=>(
-    <div className="q-ver-card" style={{marginBottom:10,borderLeft:note.pinned?"2px solid #FFB347":"none",paddingLeft:note.pinned?10:0}}>
+  // Render function (not a component) — avoids React reconciliation crash from inner component definitions
+  const renderNote=(note,draggable=false)=>(
+    <div key={note.id} className="q-ver-card" style={{marginBottom:10,borderLeft:note.pinned?"2px solid #FFB347":"none",paddingLeft:note.pinned?10:0}}>
       <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
         {draggable&&!isSearching&&<span style={{color:"var(--txt-dim)",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span>}
         <div style={{flex:1,minWidth:0}}>
@@ -2628,15 +2633,15 @@ function NotesTab({project,onAdd,onEdit,onDelete,onReorder,onPin}){
       {isSearching?(
         filtered.length===0
           ?<div style={s.empty}><p>No notes match "{search}"</p></div>
-          :filtered.map(note=><NoteCard key={note.id} note={note}/>)
+          :filtered.map(note=>renderNote(note))
       ):(
         <>
           {pinned.length>0&&<>
             <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#FFB347",letterSpacing:1.2,textTransform:"uppercase",fontWeight:700,marginBottom:8}}>📌 Pinned</div>
-            {pinned.map(note=><NoteCard key={note.id} note={note}/>)}
+            {pinned.map(note=>renderNote(note))}
             {unpinned.length>0&&<div style={{height:1,background:"var(--border)",margin:"12px 0"}}/>}
           </>}
-          {unpinned.length>0&&<DraggableList items={unpinned} onReorder={r=>onReorder([...pinned,...r])}>{note=><NoteCard note={note} draggable/>}</DraggableList>}
+          {unpinned.length>0&&<DraggableList items={unpinned} onReorder={r=>onReorder([...pinned,...r])}>{note=>renderNote(note,true)}</DraggableList>}
         </>
       )}
       {mdMode&&notes.length>0&&<p style={{...s.mono10,color:"var(--txt-faint)",marginTop:12,textAlign:"center"}}>Markdown on · **bold** *italic* `code` # Heading · toggle above for plain text</p>}
