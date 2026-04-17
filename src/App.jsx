@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.8.7";
+const APP_VER    = "v0.8.8";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -1233,10 +1233,19 @@ export default function QoderApp() {
           if(sett?.[0]?.accent_color&&sett[0].accent_color!=="#00D4FF"){saveAccent(sett[0].accent_color);}
         }catch{}
         setScreen("app");
-      }else if(isSignUp&&res.id){showToast("Check your email to confirm your account.","info");}
-      else{showToast(res.error_description||res.error||res.msg||res.message||"Authentication failed — check email and password","err");}
-    }catch(e){showToast(e.message||"Connection error — check your Supabase URL and key","err");}
-    finally{setBusy(false);}
+      }else if(isSignUp&&res.id){
+        showToast("Check your email to confirm your account.","info");
+      }else{
+        // Throw so AuthScreen can display it inline — never silently swallow
+        const msg=res.error_description||res.error||res.msg||res.message||"Authentication failed";
+        throw new Error(msg);
+      }
+    }catch(e){
+      // Re-throw so AuthScreen's local catch can display it inline
+      throw e;
+    }finally{
+      setBusy(false);
+    }
   };
   const handleSignOut=async()=>{await sb.signOut(cfg.url,cfg.key,session.access_token);await store.set(CFG_KEY,JSON.stringify({url:cfg.url,key:cfg.key}));setSession(null);setProjects([]);setScreen("auth");};
 
@@ -2211,13 +2220,52 @@ function SetupScreen({onSubmit}){
   </div></div>);
 }
 function AuthScreen({onAuth,busy,onReset}){
-  const [isSignUp,setIsSignUp]=useState(false);const[email,setEmail]=useState("");const[pw,setPw]=useState("");const[showPw,setShowPw]=useState(false);
+  const [isSignUp,setIsSignUp]=useState(false);
+  const [email,setEmail]=useState("");
+  const [pw,setPw]=useState("");
+  const [showPw,setShowPw]=useState(false);
+  const [errMsg,setErrMsg]=useState("");
+  const [localBusy,setLocalBusy]=useState(false);
+
+  const doAuth=async()=>{
+    setErrMsg("");
+    setLocalBusy(true);
+    try{
+      await onAuth(email,pw,isSignUp);
+    }catch(e){
+      setErrMsg(e.message||"Unknown error");
+    }finally{
+      setLocalBusy(false);
+    }
+  };
+
+  const isDisabled=busy||localBusy||!email.trim()||!pw.trim();
+
   return(<div style={s.authWrap}><style>{css}</style><style>{buildThemeCSS("dark","#00D4FF")}</style><div style={s.authBox}>
-    <div style={{textAlign:"center",marginBottom:28}}><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:2,marginBottom:6}}><span style={{fontFamily:"'Syne'",fontSize:40,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:30,fontWeight:700,color:"#E8EAF6",letterSpacing:"-.5px"}}>oder</span></div><p style={{color:"#8B8FA8",fontSize:13}}>{isSignUp?"Create your account":"Sign in to your workspace"}</p></div>
-    <Field label="Email"><QInput className="q-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" onKeyDown={e=>e.key==="Enter"&&onAuth(email,pw,isSignUp)}/></Field>
-    <Field label="Password"><div style={{position:"relative"}}><QInput className="q-input" type={showPw?"text":"password"} value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" style={{paddingRight:44}} onKeyDown={e=>e.key==="Enter"&&onAuth(email,pw,isSignUp)}/><button onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"var(--txt-muted)",fontSize:12,background:"none",border:"none",cursor:"pointer"}}>{showPw?"hide":"show"}</button></div></Field>
-    <button className="q-btn-primary" style={{width:"100%",marginTop:8,opacity:busy?.6:1}} disabled={busy} onClick={()=>onAuth(email,pw,isSignUp)}>{busy?"…":isSignUp?"Create Account":"Sign In →"}</button>
-    <div style={{display:"flex",justifyContent:"space-between",marginTop:16,fontSize:13}}><button onClick={()=>setIsSignUp(v=>!v)} style={{color:"#00D4FF",background:"none",border:"none",cursor:"pointer"}}>{isSignUp?"Already have an account?":"Create an account"}</button><button onClick={onReset} style={{color:"var(--txt-faint)",background:"none",border:"none",cursor:"pointer",fontSize:12}}>Change project</button></div>
+    <div style={{textAlign:"center",marginBottom:28}}>
+      <div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:2,marginBottom:6}}>
+        <span style={{fontFamily:"'Syne'",fontSize:40,fontWeight:800,color:"#00D4FF"}}>Q</span>
+        <span style={{fontFamily:"'Syne'",fontSize:30,fontWeight:700,color:"#E8EAF6",letterSpacing:"-.5px"}}>oder</span>
+      </div>
+      <p style={{color:"#8B8FA8",fontSize:13}}>{isSignUp?"Create your account":"Sign in to your workspace"}</p>
+    </div>
+    <Field label="Email">
+      <QInput className="q-input" type="email" value={email} onChange={e=>{setEmail(e.target.value);setErrMsg("");}} placeholder="you@example.com" onKeyDown={e=>e.key==="Enter"&&doAuth()}/>
+    </Field>
+    <Field label="Password">
+      <div style={{position:"relative"}}>
+        <QInput className="q-input" type={showPw?"text":"password"} value={pw} onChange={e=>{setPw(e.target.value);setErrMsg("");}} placeholder="••••••••" style={{paddingRight:44}} onKeyDown={e=>e.key==="Enter"&&doAuth()}/>
+        <button onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"#8B8FA8",fontSize:12,background:"none",border:"none",cursor:"pointer"}}>{showPw?"hide":"show"}</button>
+      </div>
+    </Field>
+    {errMsg&&<div style={{marginTop:8,padding:"9px 12px",background:"rgba(255,70,102,.12)",border:"1px solid rgba(255,70,102,.35)",borderRadius:8,color:"#FF4466",fontSize:13,fontFamily:"'JetBrains Mono'"}}>{errMsg}</div>}
+    <button className="q-btn-primary" style={{width:"100%",marginTop:12,opacity:isDisabled?.6:1}} disabled={isDisabled} onClick={doAuth}>
+      {(busy||localBusy)?"Signing in…":isSignUp?"Create Account":"Sign In →"}
+    </button>
+    <div style={{display:"flex",justifyContent:"space-between",marginTop:16,fontSize:13}}>
+      <button onClick={()=>{setIsSignUp(v=>!v);setErrMsg("");}} style={{color:"#00D4FF",background:"none",border:"none",cursor:"pointer"}}>{isSignUp?"Already have an account?":"Create an account"}</button>
+      <button onClick={onReset} style={{color:"#8B8FA8",background:"none",border:"none",cursor:"pointer",fontSize:12}}>Change project</button>
+    </div>
   </div></div>);
 }
 
