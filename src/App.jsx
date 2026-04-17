@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.8.6";
+const APP_VER    = "v0.8.7";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -213,6 +213,7 @@ const DEFAULT_TABS=[
   {key:"sprints",      label:"Sprints"      },
   {key:"todos",        label:"To-Do"        },
   {key:"notes",        label:"Notes"        },
+  {key:"daily-log",    label:"Daily Log"    },
   {key:"assets",       label:"Assets"       },
   {key:"issues",       label:"Issues"       },
   {key:"build-log",    label:"Build Log"    },
@@ -321,7 +322,7 @@ async function loadProjects(url,key,token,userId){
   const rows=await sb.get(url,key,token,"projects",`?user_id=eq.${userId}&order=position.asc`);
   if(!rows.length)return[];
   const ids=rows.map(p=>p.id).join(",");
-  const [vers,miles,notes,todos,assets,issues,ideas,concepts,builds,envs,deps,ptRows,sprints,timeSess,iComments,snippets]=await Promise.all([
+  const [vers,miles,notes,todos,assets,issues,ideas,concepts,builds,envs,deps,ptRows,sprints,timeSess,iComments,snippets,dLogs]=await Promise.all([
     sb.get(url,key,token,"versions",       `?project_id=in.(${ids})&order=date.desc`),
     sb.get(url,key,token,"milestones",     `?project_id=in.(${ids})&order=created_at.asc`),
     sb.get(url,key,token,"notes",          `?project_id=in.(${ids})&order=position.asc`),
@@ -338,6 +339,7 @@ async function loadProjects(url,key,token,userId){
     sb.get(url,key,token,"time_sessions",  `?project_id=in.(${ids})&order=started_at.desc`),
     sb.get(url,key,token,"issue_comments", `?project_id=in.(${ids})&order=created_at.asc`),
     sb.get(url,key,token,"snippets",       `?project_id=in.(${ids})&order=created_at.desc`),
+    sb.get(url,key,token,"daily_logs",     `?project_id=in.(${ids})&order=log_date.desc`).catch(()=>[]),
   ]);
   return rows.map(p=>({
     id:p.id,name:p.name,description:p.description,status:p.status,
@@ -361,6 +363,7 @@ async function loadProjects(url,key,token,userId){
     environments:envs.filter(e=>e.project_id===p.id).map(e=>({id:e.id,name:e.name,url:e.url,color:e.color,variables:e.variables||[],notes:e.notes,position:e.position,createdAt:e.created_at})),
     dependencies:deps.filter(d=>d.project_id===p.id).map(d=>({id:d.id,name:d.name,currentVersion:d.current_version,latestVersion:d.latest_version,type:d.type,status:d.status,notes:d.notes,createdAt:d.created_at})),
     snippets:    (snippets||[]).filter(s=>s.project_id===p.id).map(s=>({id:s.id,title:s.title,language:s.language,content:s.content,tags:s.tags||[],createdAt:s.created_at})),
+    dailyLogs:   (dLogs||[]).filter(d=>d.project_id===p.id).map(d=>({id:d.id,content:d.content,logDate:d.log_date,mood:d.mood||null,createdAt:d.created_at})),
   }));
 }
 
@@ -1231,9 +1234,9 @@ export default function QoderApp() {
         }catch{}
         setScreen("app");
       }else if(isSignUp&&res.id){showToast("Check your email to confirm your account.","info");}
-      else{showToast(res.error_description||res.msg||res.message||"Authentication failed","err");}
-    }catch(e){showToast(e.message,"err");}
-    setBusy(false);
+      else{showToast(res.error_description||res.error||res.msg||res.message||"Authentication failed — check email and password","err");}
+    }catch(e){showToast(e.message||"Connection error — check your Supabase URL and key","err");}
+    finally{setBusy(false);}
   };
   const handleSignOut=async()=>{await sb.signOut(cfg.url,cfg.key,session.access_token);await store.set(CFG_KEY,JSON.stringify({url:cfg.url,key:cfg.key}));setSession(null);setProjects([]);setScreen("auth");};
 
@@ -1251,7 +1254,7 @@ export default function QoderApp() {
     const position=projects.length;
     try{
       const row=await sb.post(cfg.url,cfg.key,T(),"projects",{user_id:session.user.id,name:p.name,description:p.description||null,status:p.status||"planning",tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,color:p.color||null,position,is_public:false});
-      const proj={id:row.id,name:row.name,description:row.description,status:row.status,techStack:row.tech_stack||[],localFolder:row.local_folder||null,gitUrl:row.git_url||"",supabaseUrl:row.supabase_url||"",vercelUrl:row.vercel_url||"",isPublic:false,publicSlug:null,color:row.color||null,position:row.position,createdAt:row.created_at,versions:[],milestones:[],notes:[],todos:[],assets:[],issues:[],ideas:[],concepts:[],buildLogs:[],environments:[],dependencies:[],tagIds:[],sprints:[],timeSessions:[],snippets:[]};
+      const proj={id:row.id,name:row.name,description:row.description,status:row.status,techStack:row.tech_stack||[],localFolder:row.local_folder||null,gitUrl:row.git_url||"",supabaseUrl:row.supabase_url||"",vercelUrl:row.vercel_url||"",isPublic:false,publicSlug:null,color:row.color||null,position:row.position,createdAt:row.created_at,versions:[],milestones:[],notes:[],todos:[],assets:[],issues:[],ideas:[],concepts:[],buildLogs:[],environments:[],dependencies:[],tagIds:[],sprints:[],timeSessions:[],snippets:[],dailyLogs:[]};
       setProjects(ps=>[...ps,proj]);
       showToast("Project created");
       // If created from template, apply template data
@@ -1463,6 +1466,28 @@ export default function QoderApp() {
       await sb.patch(cfg.url,cfg.key,T(),"snippets",sid,{title:sn.title,language:sn.language,content:sn.content,tags:sn.tags||[]});
       mutate(pid,p=>({...p,snippets:p.snippets.map(s=>s.id===sid?{...s,...sn}:s)}));
       showToast("Snippet updated");
+    }catch(e){showToast(e.message,"err");}
+  };
+  // ── Daily Logs ───────────────────────────────────────────────────────────────
+  const addDailyLog=async(pid,content,mood=null)=>{
+    const logDate=new Date().toISOString().slice(0,10);
+    try{
+      const row=await sb.post(cfg.url,cfg.key,T(),"daily_logs",{project_id:pid,content,mood,log_date:logDate});
+      mutate(pid,p=>({...p,dailyLogs:[{id:row.id,content:row.content,logDate:row.log_date,mood:row.mood,createdAt:row.created_at},...(p.dailyLogs||[])]}));
+      showToast("Log entry added");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const editDailyLog=async(pid,lid,content,mood=null)=>{
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"daily_logs",lid,{content,mood});
+      mutate(pid,p=>({...p,dailyLogs:(p.dailyLogs||[]).map(d=>d.id===lid?{...d,content,mood}:d)}));
+      showToast("Log updated");
+    }catch(e){showToast(e.message,"err");}
+  };
+  const deleteDailyLog=async(pid,lid)=>{
+    try{
+      await sb.del(cfg.url,cfg.key,T(),"daily_logs",lid);
+      mutate(pid,p=>({...p,dailyLogs:(p.dailyLogs||[]).filter(d=>d.id!==lid)}));
     }catch(e){showToast(e.message,"err");}
   };
   const deleteSnippet=async(pid,sid)=>{
@@ -2105,6 +2130,9 @@ export default function QoderApp() {
             onExportReadme={()=>downloadReadme(liveProj)}
             onExportTimeReport={()=>exportTimeReportCSV(projects)}
             onCompare={()=>setCompareModal(true)}
+            onAddDailyLog={(content,mood)=>addDailyLog(liveProj.id,content,mood)}
+            onEditDailyLog={(lid,content,mood)=>editDailyLog(liveProj.id,lid,content,mood)}
+            onDeleteDailyLog={(lid)=>deleteDailyLog(liveProj.id,lid)}
             onAddSnippet={()=>openModal("add-snippet",{language:"javascript",tags:[]})}
             onEditSnippet={sn=>openModal("edit-snippet",{...sn})}
             onDeleteSnippet={sid=>deleteSnippet(liveProj.id,sid)}
@@ -2175,8 +2203,8 @@ function Lightbox({url,name,onClose}){
 // ── Auth screens ──────────────────────────────────────────────────────────────
 function SetupScreen({onSubmit}){
   const [url,setUrl]=useState("");const[key,setKey]=useState("");
-  return(<div style={s.authWrap}><style>{css}</style><div style={s.authBox}>
-    <div style={{textAlign:"center",marginBottom:28}}><div style={{fontFamily:"'Syne'",fontSize:48,fontWeight:800,color:"#00D4FF",lineHeight:1,marginBottom:4}}>Q</div><div style={{fontFamily:"'Syne'",fontSize:20,fontWeight:800,color:"var(--txt)"}}>Connect Supabase</div></div>
+  return(<div style={s.authWrap}><style>{css}</style><style>{buildThemeCSS("dark","#00D4FF")}</style><div style={s.authBox}>
+    <div style={{textAlign:"center",marginBottom:28}}><img src="qoder-icon.png" style={{width:52,height:52,marginBottom:8}} onError={e=>e.target.style.display="none"}/><div style={{fontFamily:"'Syne'",fontSize:20,fontWeight:800,color:"#E8EAF6",marginBottom:4}}>Connect Supabase</div></div>
     <Field label="Project URL"><QInput className="q-input" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://xxxx.supabase.co"/></Field>
     <Field label="Anon / Public Key"><QInput className="q-input" value={key} onChange={e=>setKey(e.target.value)} placeholder="eyJhbGciOiJ…" style={{fontFamily:"'JetBrains Mono'",fontSize:12}}/></Field>
     <button className="q-btn-primary" style={{width:"100%",marginTop:8}} onClick={()=>url.trim()&&key.trim()&&onSubmit(url.trim(),key.trim())}>Connect →</button>
@@ -2184,8 +2212,8 @@ function SetupScreen({onSubmit}){
 }
 function AuthScreen({onAuth,busy,onReset}){
   const [isSignUp,setIsSignUp]=useState(false);const[email,setEmail]=useState("");const[pw,setPw]=useState("");const[showPw,setShowPw]=useState(false);
-  return(<div style={s.authWrap}><style>{css}</style><div style={s.authBox}>
-    <div style={{textAlign:"center",marginBottom:28}}><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:2,marginBottom:6}}><span style={{fontFamily:"'Syne'",fontSize:40,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:30,fontWeight:700,color:"var(--txt)",letterSpacing:"-.5px"}}>oder</span></div><p style={{color:"var(--txt-muted)",fontSize:13}}>{isSignUp?"Create your account":"Sign in to your workspace"}</p></div>
+  return(<div style={s.authWrap}><style>{css}</style><style>{buildThemeCSS("dark","#00D4FF")}</style><div style={s.authBox}>
+    <div style={{textAlign:"center",marginBottom:28}}><div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:2,marginBottom:6}}><span style={{fontFamily:"'Syne'",fontSize:40,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:30,fontWeight:700,color:"#E8EAF6",letterSpacing:"-.5px"}}>oder</span></div><p style={{color:"#8B8FA8",fontSize:13}}>{isSignUp?"Create your account":"Sign in to your workspace"}</p></div>
     <Field label="Email"><QInput className="q-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" onKeyDown={e=>e.key==="Enter"&&onAuth(email,pw,isSignUp)}/></Field>
     <Field label="Password"><div style={{position:"relative"}}><QInput className="q-input" type={showPw?"text":"password"} value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" style={{paddingRight:44}} onKeyDown={e=>e.key==="Enter"&&onAuth(email,pw,isSignUp)}/><button onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"var(--txt-muted)",fontSize:12,background:"none",border:"none",cursor:"pointer"}}>{showPw?"hide":"show"}</button></div></Field>
     <button className="q-btn-primary" style={{width:"100%",marginTop:8,opacity:busy?.6:1}} disabled={busy} onClick={()=>onAuth(email,pw,isSignUp)}>{busy?"…":isSignUp?"Create Account":"Sign In →"}</button>
@@ -2250,6 +2278,32 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
         </div>
       </div>
 
+      {/* Daily Log quick-view — today's entries across all projects */}
+      {(()=>{
+        const today=new Date().toISOString().slice(0,10);
+        const todayLogs=allProjects.flatMap(p=>(p.dailyLogs||[]).filter(d=>d.logDate===today).map(d=>({...d,projectName:p.name,projectId:p.id})));
+        if(!todayLogs.length)return null;
+        const moodColors={"great":"#4ADE80","good":"#00D4FF","okay":"#FFB347","tough":"#FF6B9D"};
+        return(
+          <div style={{marginBottom:isMobile?14:20,padding:"14px 16px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:12}}>
+            <div style={{fontFamily:"'Syne'",fontWeight:700,fontSize:13,color:"var(--txt)",marginBottom:10}}>
+              📓 Today's Log <span style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",fontWeight:400,marginLeft:8}}>{new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</span>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {todayLogs.slice(0,5).map((d,i)=>(
+                <div key={i} style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                  <div style={{width:3,borderRadius:2,background:moodColors[d.mood]||"var(--accent)",alignSelf:"stretch",flexShrink:0}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <span style={{fontSize:11,color:"var(--txt-muted)",fontFamily:"'Syne'",fontWeight:600}}>{d.projectName} · </span>
+                    <span style={{fontSize:13,color:"var(--txt-sub)",whiteSpace:"pre-wrap"}}>{d.content.length>120?d.content.slice(0,120)+"…":d.content}</span>
+                  </div>
+                </div>
+              ))}
+              {todayLogs.length>5&&<p style={{...s.mono10,color:"var(--txt-faint)"}}>+{todayLogs.length-5} more entries today</p>}
+            </div>
+          </div>
+        );
+      })()}
       {/* Stats */}
       <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:isMobile?8:12,marginBottom:isMobile?14:20}}>
         {[{label:isMobile?"Total":"Total Projects",value:stats.total,color:"#00D4FF"},{label:isMobile?"In Dev":"In Development",value:stats.inDev,color:"#FFB347"},{label:"Released",value:stats.released,color:"#4ADE80"},{label:isMobile?"Open":"Open Milestones",value:stats.open,color:"#FF6B9D"}].map(st=>(
@@ -2410,7 +2464,7 @@ function ScrollableTabBar({children,isMobile}){
 }
 
 // ── ProjectView ───────────────────────────────────────────────────────────────
-function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,pomMode,setPomMode,pomSecs,setPomSecs,pomActive,setPomActive,pomSession,setPomSession,pomCycles,setPomCycles,onAddAsset,onDeleteAsset,onUploadAssetFile,onEditAsset,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onEditBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
+function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,pomMode,setPomMode,pomSecs,setPomSecs,pomActive,setPomActive,pomSession,setPomSession,pomCycles,setPomCycles,onAddAsset,onDeleteAsset,onUploadAssetFile,onEditAsset,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddDailyLog,onEditDailyLog,onDeleteDailyLog,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onEditBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
@@ -2533,6 +2587,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
       {tab==="snippets"   &&<SnippetsTab   project={project} onAdd={onAddSnippet} onEdit={onEditSnippet} onDelete={onDeleteSnippet}/>}
       {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession} pomMode={pomMode} setPomMode={setPomMode} pomSecs={pomSecs} setPomSecs={setPomSecs} pomActive={pomActive} setPomActive={setPomActive} pomSession={pomSession} setPomSession={setPomSession} pomCycles={pomCycles} setPomCycles={setPomCycles}/>}
       {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes} onPin={onPinNote}/>}
+      {tab==="daily-log"  &&<DailyLogTab    project={project} onAdd={onAddDailyLog}  onEdit={onEditDailyLog}     onDelete={onDeleteDailyLog}/>}
       {tab==="assets"     &&<AssetsTab     project={project} onAdd={onAddAsset}     onDelete={onDeleteAsset}    onUploadFile={onUploadAssetFile} onEdit={onEditAsset} onLightbox={onLightbox}/>}
       {tab==="issues"     &&<IssuesTab     project={project} onAdd={onAddIssue}     onFix={onFixIssue}         onDelete={onDeleteIssue}  onUpdatePriority={onUpdateIssuePriority} onUploadScreenshot={onUploadIssueScreenshot} onRemoveScreenshot={onRemoveIssueScreenshot} onAddComment={onAddIssueComment} onDeleteComment={onDeleteIssueComment} onLightbox={onLightbox}/>}
       {tab==="build-log"  &&<BuildLogTab   project={project} onAdd={onAddBuildLog}   onEdit={onEditBuildLog} onUpdateStatus={onUpdateBuildStatus} onDelete={onDeleteBuildLog}/>}
@@ -3338,6 +3393,116 @@ function GroupForm({data,setData,onSubmit,onCancel}){
         </div>
       </Field>
       <FormActions onCancel={onCancel} onSubmit={()=>data.name?.trim()&&onSubmit(data)} submitLabel="Create Group"/>
+    </div>
+  );
+}
+
+// ── Daily Log Tab ─────────────────────────────────────────────────────────────
+const MOOD_OPTIONS=[
+  {key:"great",  label:"Great",  icon:"😄", color:"#4ADE80"},
+  {key:"good",   label:"Good",   icon:"🙂", color:"#00D4FF"},
+  {key:"okay",   label:"Okay",   icon:"😐", color:"#FFB347"},
+  {key:"tough",  label:"Tough",  icon:"😓", color:"#FF6B9D"},
+];
+function DailyLogTab({project,onAdd,onEdit,onDelete}){
+  const [text,setText]=useState("");
+  const [mood,setMood]=useState("good");
+  const [editing,setEditing]=useState(null); // {id, content, mood}
+  const [editText,setEditText]=useState("");
+  const [editMood,setEditMood]=useState("good");
+  const logs=project.dailyLogs||[];
+
+  // Group by date
+  const byDate=logs.reduce((acc,d)=>{const k=d.logDate||d.createdAt?.slice(0,10)||"Unknown";if(!acc[k])acc[k]=[];acc[k].push(d);return acc;},{});
+  const sortedDates=Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
+  const today=new Date().toISOString().slice(0,10);
+
+  const handleAdd=async()=>{const t=text.trim();if(!t)return;await onAdd(t,mood);setText("");};
+
+  const startEdit=(log)=>{setEditing(log.id);setEditText(log.content);setEditMood(log.mood||"good");};
+  const saveEdit=async(lid)=>{await onEdit(lid,editText.trim(),editMood);setEditing(null);};
+
+  return(
+    <div>
+      <div style={s.tabBar}>
+        <span style={s.mono12}>{logs.length} {logs.length===1?"entry":"entries"}</span>
+      </div>
+
+      {/* Today's entry composer */}
+      <div style={{background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:10,padding:14,marginBottom:20}}>
+        <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center"}}>
+          <span style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--accent-text)",fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>
+            {new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
+          </span>
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+          {MOOD_OPTIONS.map(m=>(
+            <button key={m.key} onClick={()=>setMood(m.key)} style={{padding:"4px 12px",borderRadius:20,fontSize:12,cursor:"pointer",fontFamily:"'Syne'",fontWeight:600,border:`1px solid ${mood===m.key?m.color:"var(--border-md)"}`,background:mood===m.key?`${m.color}18`:"transparent",color:mood===m.key?m.color:"var(--txt-muted)",transition:"all .15s"}}>
+              {m.icon} {m.label}
+            </button>
+          ))}
+        </div>
+        <QTextarea className="q-input" style={{minHeight:80,resize:"vertical",marginBottom:8}} value={text} onChange={e=>setText(e.target.value)} placeholder="What happened today? What did you build, fix, or learn?" onKeyDown={e=>{if(e.key==="Enter"&&e.ctrlKey){e.preventDefault();handleAdd();}}}/>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+          <span style={{...s.mono10,color:"var(--txt-faint)",alignSelf:"center"}}>Ctrl+Enter to save</span>
+          <button className="q-btn-primary" style={{padding:"7px 20px"}} onClick={handleAdd} disabled={!text.trim()}>Add Entry</button>
+        </div>
+      </div>
+
+      {/* Past entries */}
+      {logs.length===0&&<div style={s.empty}><p>No log entries yet. Start your daily log to track progress over time.</p></div>}
+      <div style={{display:"flex",flexDirection:"column",gap:20}}>
+        {sortedDates.map(date=>(
+          <div key={date}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+              <div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--accent-text)",fontWeight:700,textTransform:"uppercase",letterSpacing:1}}>
+                {date===today?"Today":new Date(date+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
+              </div>
+              <div style={{flex:1,height:1,background:"var(--border)"}}/>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {byDate[date].map(log=>{
+                const moodCfg=MOOD_OPTIONS.find(m=>m.key===log.mood)||MOOD_OPTIONS[1];
+                const isEditing=editing===log.id;
+                return(
+                  <div key={log.id} style={{background:"var(--bg-card)",border:`1px solid var(--border)`,borderLeft:`3px solid ${moodCfg.color}`,borderRadius:10,padding:14}}>
+                    {isEditing?(
+                      <>
+                        <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+                          {MOOD_OPTIONS.map(m=>(
+                            <button key={m.key} onClick={()=>setEditMood(m.key)} style={{padding:"3px 10px",borderRadius:20,fontSize:11,cursor:"pointer",fontFamily:"'Syne'",fontWeight:600,border:`1px solid ${editMood===m.key?m.color:"var(--border-md)"}`,background:editMood===m.key?`${m.color}18`:"transparent",color:editMood===m.key?m.color:"var(--txt-muted)"}}>
+                              {m.icon} {m.label}
+                            </button>
+                          ))}
+                        </div>
+                        <QTextarea className="q-input" style={{minHeight:70,resize:"vertical",marginBottom:8}} value={editText} onChange={e=>setEditText(e.target.value)} autoFocus/>
+                        <div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+                          <button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12}} onClick={()=>setEditing(null)}>Cancel</button>
+                          <button className="q-btn-primary" style={{padding:"5px 14px",fontSize:12}} onClick={()=>saveEdit(log.id)}>Save</button>
+                        </div>
+                      </>
+                    ):(
+                      <>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:8}}>
+                          <span style={{fontSize:12,padding:"2px 8px",borderRadius:12,background:`${moodCfg.color}18`,color:moodCfg.color,fontFamily:"'Syne'",fontWeight:600}}>{moodCfg.icon} {moodCfg.label}</span>
+                          <div style={{display:"flex",gap:4,flexShrink:0}}>
+                            <button className="q-btn-ghost" style={{padding:"3px 9px",fontSize:11}} onClick={()=>startEdit(log)}>Edit</button>
+                            <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this log entry?"))onDelete(log.id);}}>✕</button>
+                          </div>
+                        </div>
+                        <div style={{lineHeight:1.75,whiteSpace:"pre-wrap",color:"var(--txt-sub)",fontSize:14}}>{log.content}</div>
+                        <div style={{...s.mono10,color:"var(--txt-dim)",marginTop:8}}>
+                          {new Date(log.createdAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -4683,6 +4848,6 @@ const s={
   modalCentered:{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:1001,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:14,padding:26,width:"90%",maxWidth:560,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 8px 48px rgba(0,0,0,.25)"},
   modalTitle:{fontFamily:"'Syne'",fontSize:20,fontWeight:700,marginBottom:18,color:"var(--txt)"},
   fieldLbl:{display:"block",fontSize:11,fontWeight:700,color:"var(--txt-muted)",letterSpacing:".7px",textTransform:"uppercase",marginBottom:0},
-  authWrap:{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"var(--bg)",padding:20},
-  authBox:{width:"100%",maxWidth:420,background:"var(--bg-side)",border:"1px solid var(--border)",borderRadius:16,padding:30},
+  authWrap:{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#0A0E1A",padding:20},
+  authBox:{width:"100%",maxWidth:420,background:"#0F1525",border:"1px solid #1E2540",borderRadius:16,padding:30,boxShadow:"0 8px 40px rgba(0,0,0,.5)"},
 };
