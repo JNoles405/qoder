@@ -6,6 +6,13 @@ const os   = require('os');
 const isDev = !app.isPackaged;
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────
+// electron-log writes to %APPDATA%\Qoder\logs\main.log on Windows.
+// Loaded unconditionally so log.* calls are safe in dev too.
+const log = require('electron-log');
+log.transports.file.level = 'info';
+log.transports.console.level = 'info';
+log.info('─── Qoder starting ───', { version: app.getVersion(), isDev, platform: process.platform });
+
 let autoUpdater = null;
 if (!isDev) {
   try {
@@ -14,14 +21,9 @@ if (!isDev) {
     autoUpdater.autoDownload         = false;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.allowDowngrade       = false;
-    autoUpdater.logger = {
-      info:  (...a) => console.log('[updater]', ...a),
-      warn:  (...a) => console.warn('[updater]', ...a),
-      error: (...a) => console.error('[updater]', ...a),
-      debug: () => {},
-    };
+    autoUpdater.logger = log;
   } catch (e) {
-    console.warn('electron-updater not available:', e.message);
+    log.warn('electron-updater not available:', e.message);
     autoUpdater = null;
   }
 }
@@ -56,12 +58,15 @@ ipcMain.handle('open-html-in-browser', async (_, html) => {
 ipcMain.handle('check-for-updates', async () => {
   if (!autoUpdater) return { status: 'error', message: 'Dev build — updater disabled.' };
   try {
+    log.info('IPC check-for-updates: calling autoUpdater.checkForUpdates()');
     const result = await autoUpdater.checkForUpdates();
     const latest  = result?.updateInfo?.version;
     const current = app.getVersion();
+    log.info('IPC check-for-updates: result', { latest, current });
     if (latest && latest !== current) return { status: 'available', version: latest };
     return { status: 'not-available', version: current };
   } catch (err) {
+    log.error('IPC check-for-updates: failed', err);
     let msg = String(err.message || err);
     if (msg.includes('404') || msg.includes('HttpError'))
       msg = 'No releases found on GitHub. Run npm run electron:win to publish.';
@@ -77,10 +82,13 @@ ipcMain.handle('check-for-updates', async () => {
 
 // Explicitly start the download — called when user clicks "Download"
 ipcMain.handle('start-download', async () => {
-  if (!autoUpdater) return;
+  if (!autoUpdater) { log.warn('IPC start-download: autoUpdater is null'); return; }
   try {
-    await autoUpdater.downloadUpdate();
+    log.info('IPC start-download: calling autoUpdater.downloadUpdate()');
+    const files = await autoUpdater.downloadUpdate();
+    log.info('IPC start-download: downloadUpdate() resolved', { files });
   } catch (err) {
+    log.error('IPC start-download: downloadUpdate() threw', err);
     mainWindow?.webContents.send('update-error', err.message?.split('\n')[0]?.slice(0, 120));
   }
 });
@@ -135,24 +143,35 @@ function createWindow() {
   // Wire updater events → renderer
   if (autoUpdater) {
     autoUpdater.on('update-available', info => {
+      log.info('event update-available', { version: info.version });
       mainWindow?.webContents.send('update-available', info.version);
     });
     autoUpdater.on('download-progress', progressObj => {
-      // Send real percentage so the UI can show a progress bar
+      log.info('event download-progress', {
+        percent: progressObj.percent,
+        transferred: progressObj.transferred,
+        total: progressObj.total,
+        bytesPerSecond: progressObj.bytesPerSecond,
+      });
       mainWindow?.webContents.send('update-progress', Math.round(progressObj.percent || 0));
     });
     autoUpdater.on('update-downloaded', info => {
+      log.info('event update-downloaded', { version: info.version, path: info.downloadedFile });
       mainWindow?.webContents.send('update-ready', info.version);
     });
     autoUpdater.on('update-not-available', () => {
+      log.info('event update-not-available');
       mainWindow?.webContents.send('update-not-available');
     });
     autoUpdater.on('error', err => {
-      console.error('updater error:', err.message);
+      log.error('event error', err);
       mainWindow?.webContents.send('update-error', err.message?.split('\n')[0]?.slice(0, 120));
     });
     // Check on startup — just check, don't download yet
-    setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch {} }, 10000);
+    setTimeout(() => {
+      log.info('startup: auto-check for updates');
+      try { autoUpdater.checkForUpdates(); } catch (e) { log.error('startup check threw', e); }
+    }, 10000);
   }
 }
 
