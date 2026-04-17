@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.8.8";
+const APP_VER    = "v0.8.9";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -1432,6 +1432,12 @@ export default function QoderApp() {
 
   // ── Todos — addTodo and toggleTodo defined later with recurring support ────────
   const deleteTodo=async(pid,tid)=>{try{await sb.del(cfg.url,cfg.key,T(),"todos",tid);mutate(pid,p=>({...p,todos:p.todos.filter(t=>t.id!==tid)}));}catch(e){showToast(e.message,"err");}};
+  const clearDoneTodos=async(pid,ids)=>{
+    // Optimistically remove all from UI immediately
+    mutate(pid,p=>({...p,todos:p.todos.filter(t=>!ids.includes(t.id))}));
+    // Fire all DB deletes in parallel (no await, UI already updated)
+    ids.forEach(id=>sb.del(cfg.url,cfg.key,T(),"todos",id).catch(()=>{}));
+  };
   const reorderTodos=async(pid,reordered)=>{mutate(pid,p=>({...p,todos:reordered}));try{await Promise.all(reordered.map((t,i)=>sb.patch(cfg.url,cfg.key,T(),"todos",t.id,{position:i})));}catch{}};
 
   // ── Assets ────────────────────────────────────────────────────────────────────
@@ -2068,6 +2074,7 @@ export default function QoderApp() {
             onAddTodo={(text,priority,recurring,recurrenceType)=>addTodo(liveProj.id,text,priority,recurring,recurrenceType)}
             onToggleTodo={tid=>toggleTodo(liveProj.id,tid)}
             onDeleteTodo={tid=>deleteTodo(liveProj.id,tid)}
+            onClearDone={ids=>clearDoneTodos(liveProj.id,ids)}
             onReorderTodos={r=>reorderTodos(liveProj.id,r)}
             onAddSprint={()=>openModal("add-sprint",{})}
             onUpdateSprintStatus={(sid,st)=>updateSprintStatus(liveProj.id,sid,st)}
@@ -2289,7 +2296,7 @@ function DraggableSidebarList({items,onReorder,children}){
   const [list,setList]=useState(items);
   const [dragIdx,setDragIdx]=useState(null);
   const dragItem=useRef(null);
-  useEffect(()=>setList(items),[JSON.stringify(items.map(i=>i.id))]);
+  useEffect(()=>setList(items),[JSON.stringify(items.map(i=>({id:i.id,m:(i.milestones||[]).map(m=>m.id+m.completed).join(),iss:(i.issues||[]).map(i=>i.id+i.status+i.priority).join()})))]);
   const onDragStart=(e,i)=>{setDragIdx(i);dragItem.current=list[i];e.dataTransfer.setData("projectId",list[i].id);e.dataTransfer.effectAllowed="move";};
   const onDragOver=(e,i)=>{e.preventDefault();e.stopPropagation();if(dragItem.current===null||dragIdx===i)return;const n=[...list];const from=n.findIndex(x=>x.id===dragItem.current.id);if(from===-1)return;const[m]=n.splice(from,1);n.splice(i,0,m);setList(n);setDragIdx(i);};
   const onDrop=(e)=>{e.stopPropagation();onReorder(list);setDragIdx(null);dragItem.current=null;};
@@ -2512,7 +2519,7 @@ function ScrollableTabBar({children,isMobile}){
 }
 
 // ── ProjectView ───────────────────────────────────────────────────────────────
-function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,pomMode,setPomMode,pomSecs,setPomSecs,pomActive,setPomActive,pomSession,setPomSession,pomCycles,setPomCycles,onAddAsset,onDeleteAsset,onUploadAssetFile,onEditAsset,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddDailyLog,onEditDailyLog,onDeleteDailyLog,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onEditBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
+function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onClearDone,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,pomMode,setPomMode,pomSecs,setPomSecs,pomActive,setPomActive,pomSession,setPomSession,pomCycles,setPomCycles,onAddAsset,onDeleteAsset,onUploadAssetFile,onEditAsset,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddDailyLog,onEditDailyLog,onDeleteDailyLog,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onEditBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
@@ -2631,7 +2638,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
       {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion} onDelete={onDeleteVersion} onChangelog={onChangelog}/>}
       {tab==="milestones" &&<MilestonesTab project={project} onAdd={onAddMilestone} onToggle={onToggleMilestone} onDelete={onDeleteMilestone}/>}
       {tab==="sprints"    &&<SprintsTab    project={project} onAdd={onAddSprint} onUpdateStatus={onUpdateSprintStatus} onDelete={onDeleteSprint} onAssignTodo={onAssignTodoToSprint}/>}
-      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates||[]} onApplyChecklist={onApplyChecklist} onSaveAsTemplate={onSaveAsTemplate} onDragTodo={onDragTodo} onDeleteChecklist={onDeleteChecklist}/>}
+      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onClearDone={onClearDone} onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates||[]} onApplyChecklist={onApplyChecklist} onSaveAsTemplate={onSaveAsTemplate} onDragTodo={onDragTodo} onDeleteChecklist={onDeleteChecklist}/>}
       {tab==="snippets"   &&<SnippetsTab   project={project} onAdd={onAddSnippet} onEdit={onEditSnippet} onDelete={onDeleteSnippet}/>}
       {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession} pomMode={pomMode} setPomMode={setPomMode} pomSecs={pomSecs} setPomSecs={setPomSecs} pomActive={pomActive} setPomActive={setPomActive} pomSession={pomSession} setPomSession={setPomSession} pomCycles={pomCycles} setPomCycles={setPomCycles}/>}
       {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes} onPin={onPinNote}/>}
@@ -2659,7 +2666,6 @@ function OverviewTab({project,latestVer,allProjectsList}){
   project.versions?.forEach(v=>rawItems.push({type:"version",id:v.id,date:new Date(v.date),title:v.version,content:v.releaseNotes}));
   project.milestones?.filter(m=>m.completed).forEach(m=>rawItems.push({type:"milestone",id:m.id,date:new Date(m.completedAt||m.date||m.createdAt),title:m.title,content:m.description}));
   project.todos?.filter(t=>t.completed&&t.completedAt).forEach(t=>rawItems.push({type:"todo",id:t.id,date:new Date(t.completedAt),title:t.text,content:null}));
-  project.notes?.forEach(n=>rawItems.push({type:"note",id:n.id,date:new Date(n.createdAt),title:null,content:n.content}));
   project.issues?.filter(i=>i.status==="fixed").forEach(i=>rawItems.push({type:"issue-fixed",id:i.id,date:new Date(i.fixedAt||i.createdAt),title:i.title,content:i.fixDescription}));
   const cutoffMs=TIME_PERIODS.find(p=>p.key===period)?.ms||null;
   const now=Date.now();
@@ -2695,7 +2701,6 @@ function OverviewTab({project,latestVer,allProjectsList}){
         <button className="q-chip" style={{fontFamily:"'JetBrains Mono'",fontSize:11}} onClick={()=>setSortDir(d=>d==="desc"?"asc":"desc")}>{sortDir==="desc"?"↓ Newest":"↑ Oldest"}</button>
         <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{TIME_PERIODS.map(p=><button key={p.key} className={`q-chip${period===p.key?" q-chip-on":""}`} style={{fontSize:11,padding:"3px 9px"}} onClick={()=>setPeriod(p.key)}>{p.label}</button>)}</div>
       </div>
-      <BurndownChart project={project}/>
       {items.length===0?<div style={s.empty}><p>No activity for this period.</p></div>:(
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
           {items.map(item=>{const meta=FEED_META[item.type]||FEED_META.note;return(
@@ -2771,7 +2776,7 @@ function MilestonesTab({project,onAdd,onToggle,onDelete}){
 }
 
 // ── Todo Tab ──────────────────────────────────────────────────────────────────
-function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSprint,allProjects,onCloneTodos,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
+function TodoTab({project,onAdd,onToggle,onDelete,onClearDone,onReorder,sprints,onAssignSprint,allProjects,onCloneTodos,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
   const [newText,setNewText]=useState("");
   const [newPriority,setNewPriority]=useState("medium");
   const [newRecurring,setNewRecurring]=useState(false);
@@ -2817,7 +2822,7 @@ function TodoTab({project,onAdd,onToggle,onDelete,onReorder,sprints,onAssignSpri
               </div>
             </div>}
           </div>}
-          {done.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11,color:"#FF6B9D"}} onClick={async()=>{if(await qConfirm(`Delete all ${done.length} completed todos?`)){const ids=done.map(t=>t.id);ids.forEach(id=>onDelete(id));}}}>Clear Done</button>}
+          {done.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11,color:"#FF6B9D"}} onClick={async()=>{if(await qConfirm(`Delete all ${done.length} completed todos?`)){if(onClearDone)onClearDone(done.map(t=>t.id));else done.forEach(t=>onDelete(t.id));}}}>Clear Done</button>}
           {pending.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={async()=>{if(await qConfirm(`Mark all ${pending.length} open todos as complete?`))pending.forEach(t=>onToggle(t.id));}}>Complete All</button>}
           {pending.length>0&&onApplyChecklist&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} title="Save open todos as reusable checklist" onClick={()=>{setTemplateName("");setShowSaveTemplate(true);}}>Save as Checklist</button>}
           {otherProjects.length>0&&<button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12}} onClick={()=>setShowClone(v=>!v)}>Clone to Project…</button>}
