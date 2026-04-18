@@ -82,7 +82,7 @@ function _usePullToRefreshDisabled(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.14";
+const APP_VER    = "v0.9.15";
 const POLL_MS    = 3000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -179,7 +179,7 @@ function buildThemeCSS(themeName, accent="#00D4FF"){
   --update-ok-bg:${isLight?"#E8FAF0":"#0F2A1A"};
   --update-info-bg:${isLight?"#E8F4FF":"#0F1A2A"};
 }
-body{background:var(--bg);color:var(--txt);}
+body{background:var(--bg);color:var(--txt);}html{scrollbar-gutter:stable;}
 ::-webkit-scrollbar-track{background:var(--bg)!important;}
 ::-webkit-scrollbar-thumb{background:var(--scrollbar)!important;}
 ${isLight?`.q-ver-card,.q-card{box-shadow:var(--shadow);}
@@ -3026,13 +3026,13 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
       {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion} onDelete={onDeleteVersion} onEdit={onEditVersion} onChangelog={onChangelog} onCompare={onCompare}/>}
       {tab==="milestones" &&<MilestonesTab project={project} onAdd={onAddMilestone} onToggle={onToggleMilestone} onDelete={onDeleteMilestone}/>}
       {tab==="sprints"    &&<SprintsTab    project={project} onAdd={onAddSprint} onUpdateStatus={onUpdateSprintStatus} onDelete={onDeleteSprint} onAssignTodo={onAssignTodoToSprint}/>}
-      {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onClearDone={onClearDone} onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates||[]} onApplyChecklist={onApplyChecklist} onSaveAsTemplate={onSaveAsTemplate} onDragTodo={onDragTodo} onDeleteChecklist={onDeleteChecklist}/>}
+      {tab==="todos"      &&<TodoTab       isMobile={isMobile} project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onClearDone={onClearDone} onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates||[]} onApplyChecklist={onApplyChecklist} onSaveAsTemplate={onSaveAsTemplate} onDragTodo={onDragTodo} onDeleteChecklist={onDeleteChecklist}/>}
       {tab==="snippets"   &&<SnippetsTab   project={project} onAdd={onAddSnippet} onEdit={onEditSnippet} onDelete={onDeleteSnippet}/>}
       {tab==="time"       &&<TimeTab       project={project} onStart={onStartTimer} onStop={onStopTimer} onDelete={onDeleteTimeSession} pomMode={pomMode} setPomMode={setPomMode} pomSecs={pomSecs} setPomSecs={setPomSecs} pomActive={pomActive} setPomActive={setPomActive} pomSession={pomSession} setPomSession={setPomSession} pomCycles={pomCycles} setPomCycles={setPomCycles}/>}
       {tab==="notes"      &&<NotesTab      project={project} onAdd={onAddNote}      onEdit={onEditNote}         onDelete={onDeleteNote}     onReorder={onReorderNotes} onPin={onPinNote}/>}
       {tab==="daily-log"  &&<DailyLogTab    project={project} onAdd={onAddDailyLog}  onEdit={onEditDailyLog}     onDelete={onDeleteDailyLog}/>}
       {tab==="assets"     &&<AssetsTab     project={project} onAdd={onAddAsset}     onDelete={onDeleteAsset}    onUploadFile={onUploadAssetFile} onEdit={onEditAsset} onLightbox={onLightbox}/>}
-      {tab==="issues"     &&<IssuesTab     project={project} onAdd={onAddIssue}     onFix={onFixIssue}         onDelete={onDeleteIssue}  onUpdatePriority={onUpdateIssuePriority} onUploadScreenshot={onUploadIssueScreenshot} onRemoveScreenshot={onRemoveIssueScreenshot} onAddComment={onAddIssueComment} onDeleteComment={onDeleteIssueComment} onLightbox={onLightbox}/>}
+      {tab==="issues"     &&<IssuesTab     isMobile={isMobile} project={project} onAdd={onAddIssue}     onFix={onFixIssue}         onDelete={onDeleteIssue}  onUpdatePriority={onUpdateIssuePriority} onUploadScreenshot={onUploadIssueScreenshot} onRemoveScreenshot={onRemoveIssueScreenshot} onAddComment={onAddIssueComment} onDeleteComment={onDeleteIssueComment} onLightbox={onLightbox}/>}
       {tab==="build-log"  &&<BuildLogTab   project={project} onAdd={onAddBuildLog}   onEdit={onEditBuildLog} onUpdateStatus={onUpdateBuildStatus} onDelete={onDeleteBuildLog}/>}
       {tab==="environments"&&<EnvironmentsTab project={project} onAdd={onAddEnvironment} onEdit={onEditEnvironment} onDelete={onDeleteEnvironment}/>}
       {tab==="dependencies"&&<DependenciesTab project={project} onAdd={onAddDependency} onUpdateStatus={onUpdateDepStatus} onDelete={onDeleteDependency}/>}
@@ -3165,7 +3165,7 @@ function MilestonesTab({project,onAdd,onToggle,onDelete}){
 }
 
 // ── Todo Tab ──────────────────────────────────────────────────────────────────
-function TodoTab({project,onAdd,onToggle,onDelete,onClearDone,onReorder,sprints,onAssignSprint,allProjects,onCloneTodos,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
+function TodoTab({isMobile,project,onAdd,onToggle,onDelete,onClearDone,onReorder,sprints,onAssignSprint,allProjects,onCloneTodos,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
   const [newText,setNewText]=useState("");
   const [newPriority,setNewPriority]=useState("medium");
   const [newRecurring,setNewRecurring]=useState(false);
@@ -3191,16 +3191,16 @@ function TodoTab({project,onAdd,onToggle,onDelete,onClearDone,onReorder,sprints,
   };
   return(
     <div>
-      <div style={{padding:"10px 0 8px",display:"flex",flexDirection:"column",gap:8}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={s.mono12}>{done.length}/{todos.length} completed</span>
+      <div style={s.tabBar}>
+        <span style={s.mono12}>{done.length}/{todos.length} completed</span>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
           {checklistTemplates?.length>0&&<div style={{display:"flex",gap:4,alignItems:"center"}}>
-            <select className="q-input" style={{width:140,marginTop:0,fontSize:11,padding:"4px 8px"}} value="" onChange={e=>{if(e.target.value)onApplyChecklist(e.target.value);}}>
+            <select className="q-input" style={{width:150,marginTop:0,fontSize:11,padding:"5px 8px"}} value="" onChange={e=>{if(e.target.value)onApplyChecklist(e.target.value);}}>
               <option value="">+ Checklist…</option>
               {checklistTemplates.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
             {onDeleteChecklist&&<div style={{position:"relative"}} className="q-checklist-del-wrap">
-              <button className="q-btn-ghost" style={{padding:"4px 8px",fontSize:11,color:"var(--txt-muted)"}} title="Manage checklists" onClick={e=>{e.currentTarget.nextSibling.style.display=e.currentTarget.nextSibling.style.display==="block"?"none":"block";}}>⚙</button>
+              <button className="q-btn-ghost" style={{padding:"5px 8px",fontSize:11,color:"var(--txt-muted)"}} title="Manage checklists" onClick={e=>{e.currentTarget.nextSibling.style.display=e.currentTarget.nextSibling.style.display==="block"?"none":"block";}}>⚙</button>
               <div style={{display:"none",position:"absolute",top:"100%",right:0,zIndex:200,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:8,padding:"6px 0",minWidth:180,boxShadow:"0 4px 20px rgba(0,0,0,.3)"}}>
                 {checklistTemplates.map(t=>(
                   <div key={t.id} style={{display:"flex",alignItems:"center",padding:"6px 12px",gap:8}}>
@@ -3211,14 +3211,18 @@ function TodoTab({project,onAdd,onToggle,onDelete,onClearDone,onReorder,sprints,
               </div>
             </div>}
           </div>}
-        </div>
-        {(done.length>0||pending.length>0||otherProjects.length>0)&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {done.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11,color:"#FF6B9D"}} onClick={async()=>{if(await qConfirm(`Delete all ${done.length} completed todos?`)){if(onClearDone)onClearDone(done.map(t=>t.id));else done.forEach(t=>onDelete(t.id));}}}>Clear Done</button>}
           {pending.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={async()=>{if(await qConfirm(`Mark all ${pending.length} open todos as complete?`))pending.forEach(t=>onToggle(t.id));}}>Complete All</button>}
-          {pending.length>0&&onApplyChecklist&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={()=>{setTemplateName("");setShowSaveTemplate(true);}}>Save as Checklist</button>}
-          {otherProjects.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={()=>setShowClone(v=>!v)}>Clone to Project…</button>}
-        </div>}
+          {pending.length>0&&onApplyChecklist&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} title="Save open todos as reusable checklist" onClick={()=>{setTemplateName("");setShowSaveTemplate(true);}}>Save as Checklist</button>}
+          {otherProjects.length>0&&<button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12}} onClick={()=>setShowClone(v=>!v)}>Clone to Project…</button>}
+        </div>
       </div>
+      {isMobile&&(done.length>0||pending.length>0||otherProjects.length>0)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+        {done.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11,color:"#FF6B9D"}} onClick={async()=>{if(await qConfirm(`Delete all ${done.length} completed todos?`)){if(onClearDone)onClearDone(done.map(t=>t.id));else done.forEach(t=>onDelete(t.id));}}}>Clear Done</button>}
+        {pending.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={async()=>{if(await qConfirm(`Mark all ${pending.length} open todos as complete?`))pending.forEach(t=>onToggle(t.id));}}>Complete All</button>}
+        {pending.length>0&&onApplyChecklist&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={()=>{setTemplateName("");setShowSaveTemplate(true);}}>Save as Checklist</button>}
+        {otherProjects.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={()=>setShowClone(v=>!v)}>Clone to Project…</button>}
+      </div>}
       {showSaveTemplate&&(
         <div style={{display:"flex",gap:8,marginBottom:14,padding:"10px 14px",background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:8,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:13,color:"var(--accent-text)",fontFamily:"'Syne'",fontWeight:700,flexShrink:0}}>💾 Save checklist:</span>
@@ -3419,7 +3423,7 @@ function AssetsTab({project,onAdd,onDelete,onUploadFile,onEdit,onLightbox}){
 }
 
 // ── Issues Tab ────────────────────────────────────────────────────────────────
-function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreenshot,onRemoveScreenshot,onAddComment,onDeleteComment,onLightbox,onLinkVersion}){
+function IssuesTab({isMobile,project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreenshot,onRemoveScreenshot,onAddComment,onDeleteComment,onLightbox,onLinkVersion}){
   const [viewMode,setViewMode]=useState("list"); // "list"|"kanban"
   const issues=project.issues||[];
   const open=issues.filter(i=>i.status==="open").sort((a,b)=>{const o=["critical","high","medium","low"];return o.indexOf(a.priority)-o.indexOf(b.priority);});
@@ -3439,18 +3443,30 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
 
   return(
     <div>
-      <div style={{padding:"10px 0 8px",display:"flex",flexDirection:"column",gap:6}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={s.mono12}>{open.length} open · {fixed.length} fixed</span>
+      {!isMobile&&<div style={s.tabBar}>
+        <span style={s.mono12}>{open.length} open · {fixed.length} fixed</span>
+        <div style={{display:"flex",gap:8}}>
           <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid var(--border-md)"}}>
-            {["list","kanban"].map(m=><button key={m} onClick={()=>setViewMode(m)} style={{padding:"5px 10px",fontSize:13,background:viewMode===m?"var(--accent-dim)":"transparent",color:viewMode===m?"var(--accent-text)":"var(--txt-muted)",border:"none",cursor:"pointer"}} title={m==="list"?"List view":"Board view"}>{m==="list"?"≡":"⊞"}</button>)}
+            {["list","kanban"].map(m=><button key={m} onClick={()=>setViewMode(m)} style={{padding:"5px 12px",fontSize:11,background:viewMode===m?"var(--accent-dim)":"transparent",color:viewMode===m?"var(--accent-text)":"var(--txt-muted)",border:"none",cursor:"pointer",fontFamily:"'Syne'",fontWeight:600,textTransform:"capitalize"}}>{m==="list"?"≡ List":"⊞ Board"}</button>)}
+          </div>
+          <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={()=>exportIssuesCSV(project)}>Export CSV</button>
+          <button className="q-btn-primary" onClick={onAdd}>+ Log Issue</button>
+        </div>
+      </div>}
+      {isMobile&&<div style={{padding:"10px 0 6px",display:"flex",flexDirection:"column",gap:6}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+          <span style={s.mono12}>{open.length} open · {fixed.length} fixed</span>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:12,whiteSpace:"nowrap"}} onClick={()=>exportIssuesCSV(project)}>Export CSV</button>
+            <button className="q-btn-primary" style={{whiteSpace:"nowrap"}} onClick={onAdd}>+ Log Issue</button>
           </div>
         </div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="q-btn-primary" style={{flex:1,whiteSpace:"nowrap"}} onClick={onAdd}>+ Log Issue</button>
-          <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12,whiteSpace:"nowrap"}} onClick={()=>exportIssuesCSV(project)}>Export CSV</button>
+        <div style={{display:"flex",justifyContent:"flex-end"}}>
+          <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid var(--border-md)"}}>
+            {["list","kanban"].map(m=><button key={m} onClick={()=>setViewMode(m)} style={{padding:"5px 10px",fontSize:13,background:viewMode===m?"var(--accent-dim)":"transparent",color:viewMode===m?"var(--accent-text)":"var(--txt-muted)",border:"none",cursor:"pointer"}} title={m==="list"?"List":"Board"}>{m==="list"?"≡":"⊞"}</button>)}
+          </div>
         </div>
-      </div>
+      </div>}
       {issues.length===0&&<div style={s.empty}><p>No issues logged. 🎉</p></div>}
       {issues.length>0&&viewMode==="kanban"&&(
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12,marginTop:8}}>
@@ -4363,8 +4379,7 @@ function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,t
       </div>
       <FormActions onCancel={handleCancel} onSubmit={handleSave} submitLabel="Save Settings"/>
       <div style={{marginTop:12,textAlign:"center"}}>
-        <p style={{fontFamily:"'Syne'",fontSize:11,color:"var(--txt-faint)",lineHeight:1.7,margin:0}}>Made by Benjamin J Noles</p>
-        <p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",margin:0}}>© 2026 Midnight Skies Dev</p>
+        <p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",margin:0}}>© 2026 Midnight Skies Dev · Made by Benjamin J Noles</p>
       </div>
     </div>
   );
@@ -5168,7 +5183,7 @@ function ConfirmDialog({msg,onYes,onNo}){
   );
 }
 function Toast({msg,type}){const c={ok:{bg:"var(--toast-ok-bg)",border:"#4ADE80",text:"#4ADE80",icon:"✓"},err:{bg:"var(--toast-err-bg)",border:"#FF4466",text:"#FF7090",icon:"✕"},info:{bg:"var(--toast-info-bg)",border:"var(--accent)",text:"var(--accent)",icon:"ℹ"}}[type]||{bg:"var(--toast-ok-bg)",border:"#4ADE80",text:"#4ADE80",icon:"✓"};return<div style={{position:"fixed",bottom:24,right:24,zIndex:9999,background:c.bg,border:`1px solid ${c.border}`,color:c.text,padding:"10px 18px",borderRadius:9,fontSize:13,maxWidth:320,fontFamily:"'Syne'",fontWeight:600,boxShadow:"0 4px 24px rgba(0,0,0,.3)",lineHeight:1.5}}>{c.icon} {msg}</div>;}
-function Splash({msg}){return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--bg)"}}><span style={{color:"#00D4FF",fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,letterSpacing:.5}}>{msg}</span></div>;}
+function Splash({msg}){return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--bg)",overflow:"hidden"}}><span style={{color:"#00D4FF",fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,letterSpacing:.5}}>{msg}</span></div>;}
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 const css=`
@@ -5183,6 +5198,7 @@ const css=`
   html,body,#root{
     -webkit-tap-highlight-color:transparent;
   }
+  .q-loading-screen{overflow:hidden;height:100vh;}
 
   /* Inputs must be fully editable — no overrides, no !important battles */
   input,textarea,select{
@@ -5268,7 +5284,7 @@ const s={
   userRow:{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,gap:4},
   userEmail:{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-ghost)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1},
   mobileOverlay:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:199},
-  mobileHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"var(--bg-side)",borderBottom:"1px solid var(--border-lg)",position:"sticky",top:0,zIndex:10},
+  mobileHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"var(--bg-side)",borderBottom:"1px solid var(--border-lg)",position:"sticky",top:0,zIndex:10,width:"100%",boxSizing:"border-box"},
   hamburger:{fontSize:20,color:"var(--txt-sub)",padding:"0 6px",width:32,background:"none",border:"none",cursor:"pointer"},
   main:{flex:1,overflowY:"auto",maxHeight:"100vh",minWidth:0},
   page:{padding:"32px 40px"},
