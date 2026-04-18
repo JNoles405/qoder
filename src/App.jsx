@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.1";
+const APP_VER    = "v0.9.3";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -967,12 +967,15 @@ export default function QoderApp() {
     try{const d=JSON.parse(localStorage.getItem("q-workspace")||"{}");return{notes:d.notes||[],ideas:d.ideas||[],snippets:d.snippets||[]};}catch{return{notes:[],ideas:[],snippets:[]};}
   });
   const saveWorkspace=(next)=>{setWorkspace(next);try{localStorage.setItem("q-workspace",JSON.stringify(next));}catch{}};
-  const addWorkspaceNote=(content)=>saveWorkspace({...workspace,notes:[{id:Date.now()+"",content,createdAt:new Date().toISOString()},...workspace.notes]});
+  const addWorkspaceNote=(content)=>saveWorkspace({...workspace,notes:[{id:Date.now()+"",content,pinned:false,createdAt:new Date().toISOString()},...workspace.notes]});
+  const pinWorkspaceNote=(id)=>saveWorkspace({...workspace,notes:workspace.notes.map(n=>n.id===id?{...n,pinned:!n.pinned}:n)});
   const editWorkspaceNote=(id,content)=>saveWorkspace({...workspace,notes:workspace.notes.map(n=>n.id===id?{...n,content}:n)});
   const deleteWorkspaceNote=(id)=>saveWorkspace({...workspace,notes:workspace.notes.filter(n=>n.id!==id)});
-  const addWorkspaceIdea=(content)=>saveWorkspace({...workspace,ideas:[{id:Date.now()+"",content,createdAt:new Date().toISOString()},...workspace.ideas]});
+  const addWorkspaceIdea=(content)=>saveWorkspace({...workspace,ideas:[{id:Date.now()+"",content,pinned:false,createdAt:new Date().toISOString()},...workspace.ideas]});
+  const pinWorkspaceIdea=(id)=>saveWorkspace({...workspace,ideas:workspace.ideas.map(i=>i.id===id?{...i,pinned:!i.pinned}:i)});
   const deleteWorkspaceIdea=(id)=>saveWorkspace({...workspace,ideas:workspace.ideas.filter(i=>i.id!==id)});
-  const addWorkspaceSnippet=(title,content,language)=>saveWorkspace({...workspace,snippets:[{id:Date.now()+"",title,content,language:language||"javascript",createdAt:new Date().toISOString()},...workspace.snippets]});
+  const addWorkspaceSnippet=(title,content,language)=>saveWorkspace({...workspace,snippets:[{id:Date.now()+"",title,content,language:language||"javascript",pinned:false,createdAt:new Date().toISOString()},...workspace.snippets]});
+  const pinWorkspaceSnippet=(id)=>saveWorkspace({...workspace,snippets:workspace.snippets.map(s=>s.id===id?{...s,pinned:!s.pinned}:s)});
   const deleteWorkspaceSnippet=(id)=>saveWorkspace({...workspace,snippets:workspace.snippets.filter(s=>s.id!==id)});
 
   // Register the styled confirm dialog
@@ -2016,21 +2019,23 @@ export default function QoderApp() {
                     draggingGroupsRef.current=null;
                   };
                   return grouped.map((g,gi)=>(
-                    <div key={g.id} draggable
-                      onDragStart={e=>onGroupDragStart(e,gi)}
+                    <div key={g.id}
                       onDragOver={e=>onGroupDragOver(e,gi)}
                       onDragEnd={onGroupDragEnd}
                       style={{marginTop:gi>0?6:0,paddingTop:gi>0?6:0,borderTop:gi>0?"1px solid var(--border-lg)":"none"}}>
-                      {/* Group heading — drag handle + drop zone for project assignment */}
+                      {/* Group heading — ⠿ handle is the ONLY drag source for group reorder */}
                       <div
-                        onDragOver={e=>{if(!e.dataTransfer.types.includes("groupdrag")){e.preventDefault();e.currentTarget.style.background="var(--accent-dim)";e.currentTarget.style.outline="1px dashed var(--accent)";}}}
+                        onDragOver={e=>{if(e.dataTransfer.types.includes("groupdrag")){/* handled by parent */}else if(!e.dataTransfer.types.includes("projectid")&&e.dataTransfer.types[0]==="Files"){/* ignore */}else{e.preventDefault();e.currentTarget.style.background="var(--accent-dim)";e.currentTarget.style.outline="1px dashed var(--accent)";}}}
                         onDragLeave={e=>{e.currentTarget.style.background="";e.currentTarget.style.outline="";}}
                         onDrop={e=>{e.currentTarget.style.background="";e.currentTarget.style.outline="";const pid=e.dataTransfer.getData("projectId");if(pid){e.preventDefault();e.stopPropagation();assignProjectToGroup(pid,g.id);}}}
-                        title="Drag to reorder group · Drop a project here to assign it"
+                        title="Drop a project here to assign it to this group"
                         style={{display:"flex",alignItems:"center",padding:"4px 12px 4px 6px",gap:6,
                           borderLeft:g.color?`2px solid ${g.color}60`:"2px solid var(--border)",
-                          marginLeft:4,borderRadius:"0 4px 4px 0",transition:"background .1s",cursor:"grab"}}>
-                        <span style={{color:"var(--txt-dim)",fontSize:10,userSelect:"none",flexShrink:0}}>⠿</span>
+                          marginLeft:4,borderRadius:"0 4px 4px 0",transition:"background .1s"}}>
+                        {/* Drag handle — ONLY this span is draggable for group reorder */}
+                        <span draggable
+                          onDragStart={e=>{e.stopPropagation();onGroupDragStart(e,gi);}}
+                          style={{color:"var(--txt-dim)",fontSize:10,userSelect:"none",flexShrink:0,cursor:"grab",padding:"2px 0"}}>⠿</span>
                         {g.color&&<span style={{width:7,height:7,borderRadius:"50%",background:g.color,flexShrink:0}}/>}
                         <span style={{fontSize:10,fontWeight:700,letterSpacing:"1.2px",color:g.color||"var(--txt-faint)",textTransform:"uppercase",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",opacity:g.color?0.9:1}}>{g.name}</span>
                         <button onClick={e=>{e.stopPropagation();openModal("edit-group",{...g});}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:11,padding:"0 3px",lineHeight:1}} title="Edit group">✎</button>
@@ -2107,6 +2112,18 @@ export default function QoderApp() {
       <main style={s.main}>
         {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"var(--txt)"}}>oder</span></div><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div>}
 
+        {view==="workspace"&&<WorkspaceView
+            workspace={workspace}
+            onAddNote={addWorkspaceNote}
+            onEditNote={editWorkspaceNote}
+            onDeleteNote={deleteWorkspaceNote}
+            onAddIdea={addWorkspaceIdea}
+            onDeleteIdea={deleteWorkspaceIdea}
+            onAddSnippet={addWorkspaceSnippet}
+            onDeleteSnippet={deleteWorkspaceSnippet}
+            onToast={(m,t)=>showToast(m,t)}
+            isMobile={isMobile}
+          />}
         {view==="dashboard"&&<Dashboard projects={(()=>{
               const groupedIds=groups.flatMap(g=>filtered.filter(p=>p.groupId===g.id).map(p=>p.id));
               const ungroupedIds=filtered.filter(p=>!p.groupId&&p.status!=="archived").map(p=>p.id);
@@ -2351,20 +2368,45 @@ function DraggableSidebarList({items,onReorder,children}){
   const [list,setList]=useState(items);
   const [dragIdx,setDragIdx]=useState(null);
   const dragItem=useRef(null);
-  useEffect(()=>setList(items),[JSON.stringify(items.map(i=>({id:i.id,m:(i.milestones||[]).map(m=>m.id+m.completed).join(),iss:(i.issues||[]).map(i=>i.id+i.status+i.priority).join()})))]);
-  const onDragStart=(e,i)=>{setDragIdx(i);dragItem.current=list[i];e.dataTransfer.setData("projectId",list[i].id);e.dataTransfer.effectAllowed="move";};
-  const onDragOver=(e,i)=>{e.preventDefault();e.stopPropagation();if(dragItem.current===null||dragIdx===i)return;const n=[...list];const from=n.findIndex(x=>x.id===dragItem.current.id);if(from===-1)return;const[m]=n.splice(from,1);n.splice(i,0,m);setList(n);setDragIdx(i);};
-  const onDrop=(e)=>{e.stopPropagation();onReorder(list);setDragIdx(null);dragItem.current=null;};
-  const onDragEnd=()=>{setDragIdx(null);dragItem.current=null;};
+  const lastSwapIdx=useRef(null);
+  const workingList=useRef(null); // keep mutable copy so closures see latest
+  useEffect(()=>{setList(items);workingList.current=null;},[JSON.stringify(items.map(i=>({id:i.id,m:(i.milestones||[]).map(m=>m.id+m.completed).join(),iss:(i.issues||[]).map(i=>i.id+i.status+i.priority).join()})))]);
+  const onDragStart=(e,i)=>{
+    const cur=workingList.current||items;
+    setDragIdx(i);dragItem.current=cur[i];
+    workingList.current=[...cur];
+    e.dataTransfer.setData("projectId",cur[i].id);
+    e.dataTransfer.effectAllowed="move";
+  };
+  const onDragOver=(e,i)=>{
+    e.preventDefault();e.stopPropagation();
+    if(!dragItem.current||lastSwapIdx.current===i)return; // skip if same slot
+    const cur=workingList.current||list;
+    const from=cur.findIndex(x=>x.id===dragItem.current.id);
+    if(from===-1||from===i)return;
+    const n=[...cur];const[m]=n.splice(from,1);n.splice(i,0,m);
+    workingList.current=n;
+    lastSwapIdx.current=i;
+    setList(n);setDragIdx(i);
+  };
+  const onDrop=(e)=>{
+    e.stopPropagation();
+    onReorder(workingList.current||list);
+    setDragIdx(null);dragItem.current=null;lastSwapIdx.current=null;workingList.current=null;
+  };
+  const onDragEnd=()=>{
+    setDragIdx(null);dragItem.current=null;lastSwapIdx.current=null;workingList.current=null;
+  };
   return<>{list.map((item,i)=>(
-    <div key={item.id} draggable onDragStart={e=>onDragStart(e,i)} onDragOver={e=>onDragOver(e,i)} onDrop={onDrop} onDragEnd={onDragEnd} style={{opacity:dragIdx===i?.4:1,transition:"opacity .1s"}}>
+    <div key={item.id} draggable onDragStart={e=>onDragStart(e,i)} onDragOver={e=>onDragOver(e,i)} onDrop={onDrop} onDragEnd={onDragEnd}
+      style={{opacity:dragIdx===i?.35:1,transform:dragIdx===i?"scale(0.97)":"scale(1)",transition:"opacity .1s,transform .1s",cursor:"grab"}}>
       {children(item,i)}
     </div>
   ))}</>;
 }
 
 // ── Workspace View (global scratch — not tied to any project) ─────────────────
-function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onAddIdea,onDeleteIdea,onAddSnippet,onDeleteSnippet,onToast,isMobile}){
+function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onPinNote,onAddIdea,onDeleteIdea,onPinIdea,onAddSnippet,onDeleteSnippet,onPinSnippet,onToast,isMobile}){
   const [tab,setTab]=useState("notes"); // notes|ideas|snippets
   const [noteText,setNoteText]=useState("");
   const [editingNote,setEditingNote]=useState(null);
@@ -2388,7 +2430,7 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onAddIdea,on
 
       {/* Tab bar */}
       <div style={{display:"flex",gap:4,marginBottom:24,borderBottom:"1px solid var(--border)",paddingBottom:0}}>
-        {[{key:"notes",label:"📝 Notes",count:workspace.notes.length},{key:"ideas",label:"💡 Ideas",count:workspace.ideas.length},{key:"snippets",label:"💻 Snippets",count:workspace.snippets.length}].map(t=>(
+        {[{key:"notes",label:"Notes",count:workspace.notes.length},{key:"ideas",label:"Ideas",count:workspace.ideas.length},{key:"snippets",label:"Snippets",count:workspace.snippets.length}].map(t=>(
           <button key={t.key} onClick={()=>setTab(t.key)} style={{padding:"9px 18px",fontSize:13,background:"none",border:"none",borderBottom:tab===t.key?"2px solid var(--accent)":"2px solid transparent",color:tab===t.key?"var(--accent-text)":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",fontWeight:tab===t.key?700:600,transition:"all .15s",marginBottom:-1}}>
             {t.label}{t.count>0&&<span style={{...s.tabPill,marginLeft:6}}>{t.count}</span>}
           </button>
@@ -2407,9 +2449,11 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onAddIdea,on
             </div>
           </div>
           {workspace.notes.length===0&&<div style={s.empty}><p>No notes yet. Write anything — thoughts, references, reminders.</p></div>}
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {workspace.notes.map(n=>(
-              <div key={n.id} style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderLeft:"3px solid var(--accent)",borderRadius:10,padding:14}}>
+          {(()=>{
+            const pinned=workspace.notes.filter(n=>n.pinned);
+            const unpinned=workspace.notes.filter(n=>!n.pinned);
+            const renderNote=(n)=>(
+              <div key={n.id} style={{background:"var(--bg-card)",border:`1px solid ${n.pinned?"#FFB347":"var(--border)"}`,borderLeft:`3px solid ${n.pinned?"#FFB347":"var(--accent)"}`,borderRadius:10,padding:14}}>
                 {editingNote===n.id?(
                   <>
                     <QTextarea className="q-input" style={{minHeight:70,resize:"vertical",marginBottom:8}} value={editText} onChange={e=>setEditText(e.target.value)} autoFocus/>
@@ -2424,6 +2468,7 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onAddIdea,on
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <span style={{...s.mono10,color:"var(--txt-dim)"}}>{new Date(n.createdAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>
                       <div style={{display:"flex",gap:4}}>
+                        <button title={n.pinned?"Unpin":"Pin"} onClick={()=>onPinNote&&onPinNote(n.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,opacity:n.pinned?1:.4,padding:"2px 4px",transition:"opacity .15s"}} onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=n.pinned?1:.4}><PinIcon size={13} active={n.pinned}/></button>
                         <button className="q-btn-ghost" style={{padding:"3px 9px",fontSize:11}} onClick={()=>{setEditingNote(n.id);setEditText(n.content);}}>Edit</button>
                         <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this note?"))onDeleteNote(n.id);}}>✕</button>
                       </div>
@@ -2431,8 +2476,14 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onAddIdea,on
                   </>
                 )}
               </div>
-            ))}
-          </div>
+            );
+            return(
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {pinned.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#FFB347",fontWeight:700,letterSpacing:1,textTransform:"uppercase"}}>📌 Pinned</div>{pinned.map(renderNote)}<div style={{height:1,background:"var(--border)",margin:"4px 0"}}/></>}
+                {unpinned.map(renderNote)}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2447,15 +2498,24 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onAddIdea,on
             </div>
           </div>
           {workspace.ideas.length===0&&<div style={s.empty}><p>No ideas yet. This is your free-form idea dump — no project required.</p></div>}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
-            {workspace.ideas.map(idea=>(
-              <div key={idea.id} style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderLeft:"3px solid #B47FFF",borderRadius:10,padding:14,position:"relative"}}>
-                <button className="q-del" style={{position:"absolute",top:8,right:8}} onClick={async()=>{if(await qConfirm("Delete this idea?"))onDeleteIdea(idea.id);}}>✕</button>
-                <p style={{color:"var(--txt-sub)",fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap",paddingRight:20}}>{idea.content}</p>
+          {(()=>{
+            const pinnedI=workspace.ideas.filter(i=>i.pinned);
+            const unpinnedI=workspace.ideas.filter(i=>!i.pinned);
+            const renderIdea=(idea)=>(
+              <div key={idea.id} style={{background:"var(--bg-card)",border:`1px solid ${idea.pinned?"#FFB347":"var(--border)"}`,borderLeft:`3px solid ${idea.pinned?"#FFB347":"#B47FFF"}`,borderRadius:10,padding:14,position:"relative"}}>
+                <div style={{position:"absolute",top:8,right:8,display:"flex",gap:3}}>
+                  <button title={idea.pinned?"Unpin":"Pin"} onClick={()=>onPinIdea&&onPinIdea(idea.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,opacity:idea.pinned?1:.4,padding:"2px 4px",transition:"opacity .15s"}} onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=idea.pinned?1:.4}><PinIcon size={13} active={idea.pinned}/></button>
+                  <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this idea?"))onDeleteIdea(idea.id);}}>✕</button>
+                </div>
+                <p style={{color:"var(--txt-sub)",fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap",paddingRight:52}}>{idea.content}</p>
                 <div style={{...s.mono10,color:"var(--txt-dim)",marginTop:8}}>{new Date(idea.createdAt).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
               </div>
-            ))}
-          </div>
+            );
+            return(<>
+              {pinnedI.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#FFB347",fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>📌 Pinned</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10,marginBottom:12}}>{pinnedI.map(renderIdea)}</div><div style={{height:1,background:"var(--border)",marginBottom:12}}/></>}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>{unpinnedI.map(renderIdea)}</div>
+            </>);
+          })()}
         </div>
       )}
 
@@ -2480,15 +2540,18 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onAddIdea,on
             </div>
           )}
           {workspace.snippets.length===0&&<div style={s.empty}><p>No snippets yet. Save reusable code, commands, or templates here.</p></div>}
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {workspace.snippets.map(sn=>(
-              <div key={sn.id} style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
+          {(()=>{
+            const pinnedS=workspace.snippets.filter(s=>s.pinned);
+            const unpinnedS=workspace.snippets.filter(s=>!s.pinned);
+            const renderSnippet=(sn)=>(
+              <div key={sn.id} style={{background:"var(--bg-card)",border:`1px solid ${sn.pinned?"#FFB347":"var(--border)"}`,borderRadius:10,padding:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
                   <div>
                     <span style={{fontFamily:"'Syne'",fontWeight:700,fontSize:15,color:"var(--txt)"}}>{sn.title}</span>
                     <span style={{marginLeft:10,fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--accent-text)",padding:"1px 6px",borderRadius:4,background:"var(--accent-dim)"}}>{sn.language}</span>
                   </div>
-                  <div style={{display:"flex",gap:4}}>
+                  <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                    <button title={sn.pinned?"Unpin":"Pin"} onClick={()=>onPinSnippet&&onPinSnippet(sn.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,opacity:sn.pinned?1:.4,padding:"2px 4px",transition:"opacity .15s"}} onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=sn.pinned?1:.4}><PinIcon size={13} active={sn.pinned}/></button>
                     <button className="q-btn-ghost" style={{padding:"3px 9px",fontSize:11}} onClick={()=>navigator.clipboard.writeText(sn.content).then(()=>onToast&&onToast("Copied","ok"))}>Copy</button>
                     <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this snippet?"))onDeleteSnippet(sn.id);}}>✕</button>
                   </div>
@@ -2496,8 +2559,14 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onAddIdea,on
                 <pre style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--txt-sub)",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"var(--bg)",padding:12,borderRadius:8,maxHeight:200,overflow:"auto",margin:0}}>{sn.content}</pre>
                 <div style={{...s.mono10,color:"var(--txt-dim)",marginTop:8}}>{new Date(sn.createdAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
               </div>
-            ))}
-          </div>
+            );
+            return(
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {pinnedS.length>0&&<><div style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"#FFB347",fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>📌 Pinned</div>{pinnedS.map(renderSnippet)}<div style={{height:1,background:"var(--border)",margin:"8px 0"}}/></>}
+                {unpinnedS.map(renderSnippet)}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
