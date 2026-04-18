@@ -82,7 +82,7 @@ function _usePullToRefreshDisabled(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.15";
+const APP_VER    = "v0.9.16";
 const POLL_MS    = 3000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -1087,11 +1087,11 @@ export default function QoderApp() {
               if(sett?.[0]?.workspace_data){const wd=sett[0].workspace_data;setWorkspace({notes:wd.notes||[],ideas:wd.ideas||[],snippets:wd.snippets||[]});}
               else{try{const d=JSON.parse(localStorage.getItem("q-workspace")||"{}");if(d.notes||d.ideas||d.snippets)setWorkspace({notes:d.notes||[],ideas:d.ideas||[],snippets:d.snippets||[]});}catch{}}
             }catch{}
-            setScreen("app");return;
+            if(typeof document!=="undefined")document.body.style.overflow="";setScreen("app");return;
           }
         }
-        setScreen("auth");
-      }catch{setScreen("setup");}
+        if(typeof document!=="undefined")document.body.style.overflow="";setScreen("auth");
+      }catch{if(typeof document!=="undefined")document.body.style.overflow="";setScreen("setup");}
     })();
   },[]);
 
@@ -3211,10 +3211,10 @@ function TodoTab({isMobile,project,onAdd,onToggle,onDelete,onClearDone,onReorder
               </div>
             </div>}
           </div>}
-          {done.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11,color:"#FF6B9D"}} onClick={async()=>{if(await qConfirm(`Delete all ${done.length} completed todos?`)){if(onClearDone)onClearDone(done.map(t=>t.id));else done.forEach(t=>onDelete(t.id));}}}>Clear Done</button>}
-          {pending.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={async()=>{if(await qConfirm(`Mark all ${pending.length} open todos as complete?`))pending.forEach(t=>onToggle(t.id));}}>Complete All</button>}
-          {pending.length>0&&onApplyChecklist&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} title="Save open todos as reusable checklist" onClick={()=>{setTemplateName("");setShowSaveTemplate(true);}}>Save as Checklist</button>}
-          {otherProjects.length>0&&<button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12}} onClick={()=>setShowClone(v=>!v)}>Clone to Project…</button>}
+          {!isMobile&&done.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11,color:"#FF6B9D"}} onClick={async()=>{if(await qConfirm(`Delete all ${done.length} completed todos?`)){if(onClearDone)onClearDone(done.map(t=>t.id));else done.forEach(t=>onDelete(t.id));}}}>Clear Done</button>}
+          {!isMobile&&pending.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={async()=>{if(await qConfirm(`Mark all ${pending.length} open todos as complete?`))pending.forEach(t=>onToggle(t.id));}}>Complete All</button>}
+          {!isMobile&&pending.length>0&&onApplyChecklist&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} title="Save open todos as reusable checklist" onClick={()=>{setTemplateName("");setShowSaveTemplate(true);}}>Save as Checklist</button>}
+          {!isMobile&&otherProjects.length>0&&<button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12}} onClick={()=>setShowClone(v=>!v)}>Clone to Project…</button>}
         </div>
       </div>
       {isMobile&&(done.length>0||pending.length>0||otherProjects.length>0)&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
@@ -5183,7 +5183,7 @@ function ConfirmDialog({msg,onYes,onNo}){
   );
 }
 function Toast({msg,type}){const c={ok:{bg:"var(--toast-ok-bg)",border:"#4ADE80",text:"#4ADE80",icon:"✓"},err:{bg:"var(--toast-err-bg)",border:"#FF4466",text:"#FF7090",icon:"✕"},info:{bg:"var(--toast-info-bg)",border:"var(--accent)",text:"var(--accent)",icon:"ℹ"}}[type]||{bg:"var(--toast-ok-bg)",border:"#4ADE80",text:"#4ADE80",icon:"✓"};return<div style={{position:"fixed",bottom:24,right:24,zIndex:9999,background:c.bg,border:`1px solid ${c.border}`,color:c.text,padding:"10px 18px",borderRadius:9,fontSize:13,maxWidth:320,fontFamily:"'Syne'",fontWeight:600,boxShadow:"0 4px 24px rgba(0,0,0,.3)",lineHeight:1.5}}>{c.icon} {msg}</div>;}
-function Splash({msg}){return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--bg)",overflow:"hidden"}}><span style={{color:"#00D4FF",fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,letterSpacing:.5}}>{msg}</span></div>;}
+function Splash({msg}){typeof document!=="undefined"&&(document.body.style.overflow="hidden");return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--bg)",overflow:"hidden"}}><span style={{color:"#00D4FF",fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,letterSpacing:.5}}>{msg}</span></div>;}
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 const css=`
@@ -5284,9 +5284,9 @@ const s={
   userRow:{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,gap:4},
   userEmail:{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-ghost)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1},
   mobileOverlay:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:199},
-  mobileHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"var(--bg-side)",borderBottom:"1px solid var(--border-lg)",position:"sticky",top:0,zIndex:10,width:"100%",boxSizing:"border-box"},
+  mobileHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"var(--bg-side)",borderBottom:"1px solid var(--border-lg)",position:"sticky",top:0,zIndex:10,width:"100vw",maxWidth:"100%",boxSizing:"border-box",left:0},
   hamburger:{fontSize:20,color:"var(--txt-sub)",padding:"0 6px",width:32,background:"none",border:"none",cursor:"pointer"},
-  main:{flex:1,overflowY:"auto",maxHeight:"100vh",minWidth:0},
+  main:{flex:1,overflowY:"scroll",maxHeight:"100vh",minWidth:0,scrollbarGutter:"stable"},
   page:{padding:"32px 40px"},
   pageHead:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:26},
   pageTitle:{fontFamily:"'Syne'",fontSize:28,fontWeight:800,color:"var(--txt)",letterSpacing:"-.5px"},
