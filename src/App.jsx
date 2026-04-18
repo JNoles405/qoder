@@ -14,38 +14,59 @@ function useIsMobile() {
 
 // Pull-to-refresh for mobile (Capacitor WebView)
 function usePullToRefresh(onRefresh){
+  // Pull-to-refresh: only fires when at the very top, requires deliberate downward pull
+  // with minimal horizontal movement. The refresh FAB is the primary mobile refresh method.
   useEffect(()=>{
-    let startY=0,pulling=false,indicator=null;
+    let startY=0,startX=0,pulling=false,indicator=null,refreshing=false;
+    const THRESHOLD=100;
+    const MAX_HORIZ=15; // very tight — must be nearly vertical
 
     const createIndicator=()=>{
       const el=document.createElement("div");
       el.id="ptr-indicator";
-      el.style.cssText="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:9998;background:var(--bg-side,#0C1020);border:1px solid var(--border,#1A2040);border-top:none;border-radius:0 0 20px 20px;padding:6px 18px 8px;font-family:'Syne',sans-serif;font-size:12px;color:var(--accent,#00D4FF);font-weight:600;pointer-events:none;transition:opacity .2s;opacity:0;";
+      el.style.cssText="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:9998;background:#0C1020;border:1px solid #1A2040;border-top:none;border-radius:0 0 20px 20px;padding:6px 18px 8px;font-family:'Syne',sans-serif;font-size:12px;color:#00D4FF;font-weight:600;pointer-events:none;transition:opacity .2s;opacity:0;";
       el.textContent="↓ Pull to refresh";
       document.body.appendChild(el);
       return el;
     };
 
-    let startX=0;
-    const THRESHOLD=90; // raised from 70
-    const onTouchStart=e=>{startY=e.touches[0].clientY;startX=e.touches[0].clientX;pulling=window.scrollY===0||document.documentElement.scrollTop===0;};
+    const onTouchStart=e=>{
+      if(refreshing)return;
+      const atTop=window.scrollY===0||document.documentElement.scrollTop===0;
+      if(!atTop)return;
+      startY=e.touches[0].clientY;
+      startX=e.touches[0].clientX;
+      pulling=true;
+    };
     const onTouchMove=e=>{
-      if(!pulling)return;
+      if(!pulling||refreshing)return;
       const dy=e.touches[0].clientY-startY;
       const dx=Math.abs(e.touches[0].clientX-startX);
-      // Cancel if horizontal swipe (tabs) — require dy > 2*dx to be clearly vertical
-      if(dx>20||dy<20||dy<dx*2){pulling=false;return;}
+      if(dx>MAX_HORIZ||dy<=0){pulling=false;return;} // cancel on any noticeable horizontal
+      if(dy<20)return;
       if(!indicator)indicator=createIndicator();
-      const pct=Math.min(dy/90,1);
+      const pct=Math.min(dy/THRESHOLD,1);
       indicator.style.opacity=String(pct);
       indicator.textContent=pct>=1?"↑ Release to refresh":"↓ Pull to refresh";
     };
     const onTouchEnd=e=>{
-      if(!pulling||!indicator)return;
+      if(!pulling)return;
+      pulling=false;
+      if(!indicator)return;
       const dy=e.changedTouches[0].clientY-startY;
-      if(dy>=THRESHOLD){indicator.textContent="Refreshing…";onRefresh().then(()=>{if(indicator){indicator.style.opacity="0";setTimeout(()=>{indicator?.remove();indicator=null;},300);}});}
-      else{indicator.style.opacity="0";setTimeout(()=>{indicator?.remove();indicator=null;},200);}
-      pulling=false;startY=0;
+      if(dy>=THRESHOLD){
+        refreshing=true;
+        indicator.textContent="Refreshing…";
+        indicator.style.opacity="1";
+        onRefresh().then(()=>{
+          indicator&&(indicator.style.opacity="0");
+          setTimeout(()=>{indicator?.remove();indicator=null;refreshing=false;},300);
+        });
+      } else {
+        indicator.style.opacity="0";
+        setTimeout(()=>{indicator?.remove();indicator=null;},200);
+      }
+      startY=0;startX=0;
     };
 
     document.addEventListener("touchstart",onTouchStart,{passive:true});
@@ -57,7 +78,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.6";
+const APP_VER    = "v0.9.8";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -1438,6 +1459,13 @@ export default function QoderApp() {
   };
 
   // ── Versions ─────────────────────────────────────────────────────────────────
+  const updateVersion=async(pid,vid,v)=>{
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"versions",vid,{version:v.version,release_notes:v.releaseNotes||null,date:v.date,file_links:v.fileLinks||[]});
+      mutate(pid,p=>({...p,versions:p.versions.map(x=>x.id===vid?{...x,version:v.version,releaseNotes:v.releaseNotes,date:v.date,fileLinks:v.fileLinks||[]}:x)}));
+      showToast("Version updated");
+    }catch(e){showToast(e.message,"err");}
+  };
   const addVersion=async(pid,v)=>{
     try{
       const row=await sb.post(cfg.url,cfg.key,T(),"versions",{project_id:pid,version:v.version,release_notes:v.releaseNotes||null,date:v.date||new Date().toISOString(),file_links:(v.fileLinks||[]).filter(Boolean)});
@@ -2177,6 +2205,7 @@ export default function QoderApp() {
         {view==="project"&&liveProj&&(
           <ProjectView project={liveProj} tab={projTab} setTab={setProjTab} isMobile={isMobile} tabOrder={tabOrder}
             onAddVersion={()=>openModal("add-version",{fileLinks:[""]})}
+            onEditVersion={v=>openModal("edit-version",{...v})}
             onAddMilestone={()=>openModal("add-milestone",{})}
             onToggleMilestone={mid=>toggleMilestone(liveProj.id,mid)}
             onDeleteMilestone={mid=>deleteMilestone(liveProj.id,mid)}
@@ -2287,6 +2316,7 @@ export default function QoderApp() {
         {modal==="edit-project" &&<ProjectForm   data={form} setData={setForm} title="Edit Project" userTags={userTags} templates={templates} groups={groups} onSubmit={async d=>{await updateProject(selProj.id,d);const cur=selProj.tagIds||[];const add=(d.tagIds||[]).filter(id=>!cur.includes(id));const rem=cur.filter(id=>!(d.tagIds||[]).includes(id));await Promise.all([...add.map(id=>assignTag(selProj.id,id)),...rem.map(id=>unassignTag(selProj.id,id))]);closeModal();}} onCancel={closeModal}/>}
         {modal==="changelog"    &&<ChangelogModal project={liveProj||selProj} onClose={closeModal} onPublishRelease={(tag,name,body,token,draft)=>publishRelease(liveProj?.id||selProj?.id,tag,name,body,token,draft)}/>}
         {modal==="add-version"  &&<VersionForm   data={form} setData={setForm} onSubmit={d=>{addVersion(selProj.id,d);closeModal();}}                                     onCancel={closeModal}/>}
+        {modal==="edit-version" &&<VersionForm   data={form} setData={setForm} title="Edit Version" onSubmit={d=>{updateVersion(selProj.id,d.id,d);closeModal();}}            onCancel={closeModal}/>}
         {modal==="add-milestone"&&<MilestoneForm data={form} setData={setForm} onSubmit={d=>{addMilestone(selProj.id,d);closeModal();}}                                   onCancel={closeModal}/>}
         {modal==="add-note"     &&<NoteForm      data={form} setData={setForm} title="Add Note"  onSubmit={d=>{addNote(selProj.id,d.content);closeModal();}}              onCancel={closeModal}/>}
         {modal==="edit-note"    &&<NoteForm      data={form} setData={setForm} title="Edit Note" onSubmit={d=>{updateNote(selProj.id,d.id,d.content);closeModal();}}      onCancel={closeModal}/>}
@@ -2832,7 +2862,7 @@ function ScrollableTabBar({children,isMobile}){
 }
 
 // ── ProjectView ───────────────────────────────────────────────────────────────
-function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onClearDone,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,pomMode,setPomMode,pomSecs,setPomSecs,pomActive,setPomActive,pomSession,setPomSession,pomCycles,setPomCycles,onAddAsset,onDeleteAsset,onUploadAssetFile,onEditAsset,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddDailyLog,onEditDailyLog,onDeleteDailyLog,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onEditBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
+function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,onRefreshGitHub,onLoadGitHubCache,templates,onSaveTemplate,onApplyTemplate,onOpenSaveTemplate,onExportJSON,onExportPDF,onExportReadme,onTogglePublic,onCopyPublicLink,onAddVersion,onEditVersion,onAddMilestone,onToggleMilestone,onDeleteMilestone,onDeleteVersion,onAddNote,onEditNote,onDeleteNote,onReorderNotes,onPinNote,onAddTodo,onToggleTodo,onDeleteTodo,onClearDone,onReorderTodos,onAddSprint,onUpdateSprintStatus,onDeleteSprint,onAssignTodoToSprint,onStartTimer,onStopTimer,onDeleteTimeSession,pomMode,setPomMode,pomSecs,setPomSecs,pomActive,setPomActive,pomSession,setPomSession,pomCycles,setPomCycles,onAddAsset,onDeleteAsset,onUploadAssetFile,onEditAsset,onAddIssue,onFixIssue,onDeleteIssue,onUpdateIssuePriority,onUploadIssueScreenshot,onRemoveIssueScreenshot,onAddIssueComment,onDeleteIssueComment,onAddDailyLog,onEditDailyLog,onDeleteDailyLog,onAddSnippet,onEditSnippet,onDeleteSnippet,onSaveSnippet,onAddBuildLog,onEditBuildLog,onUpdateBuildStatus,onDeleteBuildLog,onAddEnvironment,onEditEnvironment,onDeleteEnvironment,onAddDependency,onUpdateDepStatus,onDeleteDependency,onAddIdea,onEditIdea,onToggleIdeaPin,onDeleteIdea,onReorderIdeas,onAddConcept,onDeleteConcept,onUploadConceptFile,onLightbox,onChangelog,onPublishRelease,onEdit,onArchive,onUnarchive,onDuplicate,onCloneTodos,onDelete,allProjects,onExportTimeReport,onCompare,checklistTemplates,onApplyChecklist,onSaveAsTemplate,onDragTodo,onDeleteChecklist}){
   const cfg=STATUS_CONFIG[project.status]||STATUS_CONFIG.planning;
   const latVer=project.versions?.[0]?.version||"—";
   const projTags=(userTags||[]).filter(t=>(project.tagIds||[]).includes(t.id));
@@ -2989,7 +3019,7 @@ function OverviewTab({project,latestVer,allProjectsList}){
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={s.statsGrid}>
         {[{label:"Current Version",value:latestVer,color:"var(--accent-text)"},{label:"Total Releases",value:project.versions?.length||0,color:"var(--txt)"},{label:"Milestones",value:`${msDone}/${msTotal}`,color:"var(--txt)"},{label:"Progress",value:`${pct}%`,color:"#4ADE80"}].map(st=>(
-          <div key={st.label} style={s.statCard}><div style={{fontFamily:"'JetBrains Mono'",fontSize:20,fontWeight:700,color:st.color,lineHeight:1}}>{st.value}</div><div style={s.statLbl}>{st.label}</div></div>
+          <div key={st.label} style={{...s.statCard,padding:isMobile?"10px 12px":"14px 16px"}}><div style={{fontFamily:"'JetBrains Mono'",fontSize:isMobile?14:20,fontWeight:700,color:st.color,lineHeight:1}}>{st.value}</div><div style={{...s.statLbl,fontSize:isMobile?9:11,marginTop:isMobile?4:6}}>{st.label}</div></div>
         ))}
       </div>
       {(project.dependsOn||[]).length>0&&(()=>{
@@ -3036,7 +3066,7 @@ function OverviewTab({project,latestVer,allProjectsList}){
 }
 
 // ── Versions Tab ──────────────────────────────────────────────────────────────
-function VersionsTab({project,onAdd,onDelete,onChangelog,onCompare}){
+function VersionsTab({project,onAdd,onDelete,onEdit,onChangelog,onCompare}){
   return(
     <div>
       <div style={s.tabBar}>
@@ -3053,7 +3083,7 @@ function VersionsTab({project,onAdd,onDelete,onChangelog,onCompare}){
             <div key={v.id} className="q-ver-card">
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                 <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontFamily:"'JetBrains Mono'",color:"#00D4FF",fontWeight:700,fontSize:16}}>{v.version}</span>{i===0&&<span style={{...s.badge,color:"#4ADE80",background:"rgba(74,222,128,0.1)",fontSize:10}}>Latest</span>}</div>
-                <div style={{display:"flex",alignItems:"center",gap:10}}><span style={s.mono10}>{new Date(v.date).toLocaleDateString()}</span><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this version?"))onDelete(v.id);}}>✕</button></div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}><span style={s.mono10}>{new Date(v.date).toLocaleDateString()}</span><button className="q-btn-ghost" style={{padding:"3px 9px",fontSize:11}} onClick={()=>onEdit&&onEdit(v)}>Edit</button><button className="q-del" onClick={async()=>{if(await qConfirm("Remove this version?"))onDelete(v.id);}}>✕</button></div>
               </div>
               {v.releaseNotes&&<p style={{color:"var(--txt-sub)",fontSize:14,lineHeight:1.65,marginBottom:10}}>{v.releaseNotes}</p>}
               {v.fileLinks?.filter(l=>l).length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:7}}>{v.fileLinks.filter(l=>l).map((link,j)=><a key={j} href={link} target="_blank" rel="noreferrer" style={s.fileLink}>↗ {decodeURIComponent(link.split("/").pop()?.split("?")[0]||`File ${j+1}`).slice(0,42)}</a>)}</div>}
@@ -4355,13 +4385,14 @@ function ProjectForm({data,setData,title,userTags,templates,groups,onSubmit,onCa
     </div>
   );
 }
-function VersionForm({data,setData,onSubmit,onCancel}){
+function VersionForm({data,setData,onSubmit,onCancel,title}){
   const set=(k,v)=>setData(d=>({...d,[k]:v}));
   const updLink=(i,v)=>setData(d=>({...d,fileLinks:d.fileLinks.map((l,j)=>j===i?v:l)}));
   const addLink=()=>setData(d=>({...d,fileLinks:[...(d.fileLinks||[]),""]  }));
   const rmLink=i=>setData(d=>({...d,fileLinks:d.fileLinks.filter((_,j)=>j!==i)}));
-  const today=new Date().toISOString().split("T")[0];
-  return(<div><h2 style={s.modalTitle}>Log New Version</h2><Field label="Version Number *"><input className="q-input q-mono" value={data.version||""} onChange={e=>set("version",e.target.value)} placeholder="e.g., v1.2.0"/></Field><Field label="Release Date"><input type="date" className="q-input" value={data.date?.split("T")[0]||today} onChange={e=>set("date",e.target.value)}/></Field><Field label="Release Notes"><QTextarea className="q-input" style={{height:90,resize:"vertical"}} value={data.releaseNotes||""} onChange={e=>set("releaseNotes",e.target.value)} placeholder="What changed?"/></Field><Field label="File / Download Links">{(data.fileLinks||[]).map((link,i)=><div key={i} style={{display:"flex",gap:8,marginTop:8}}><QInput className="q-input" style={{flex:1}} value={link} onChange={e=>updLink(i,e.target.value)} placeholder="https://…"/><button className="q-btn-ghost" style={{padding:"0 12px"}} onClick={()=>rmLink(i)}>✕</button></div>)}<button className="q-btn-ghost" style={{marginTop:8,fontSize:12}} onClick={addLink}>+ Add Link</button></Field><FormActions onCancel={onCancel} onSubmit={()=>data.version?.trim()&&onSubmit(data)} submitLabel="Log Version"/></div>);
+  // Use local date to avoid UTC off-by-one issue for users west of UTC
+  const today=(()=>{const d=new Date();const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),dd=String(d.getDate()).padStart(2,"0");return`${y}-${m}-${dd}`;})();
+  return(<div><h2 style={s.modalTitle}>{title||"Log New Version"}</h2><Field label="Version Number *"><input className="q-input q-mono" value={data.version||""} onChange={e=>set("version",e.target.value)} placeholder="e.g., v1.2.0"/></Field><Field label="Release Date"><input type="date" className="q-input" value={data.date?.split("T")[0]||today} onChange={e=>set("date",e.target.value)}/></Field><Field label="Release Notes"><QTextarea className="q-input" style={{height:90,resize:"vertical"}} value={data.releaseNotes||""} onChange={e=>set("releaseNotes",e.target.value)} placeholder="What changed?"/></Field><Field label="File / Download Links">{(data.fileLinks||[]).map((link,i)=><div key={i} style={{display:"flex",gap:8,marginTop:8}}><QInput className="q-input" style={{flex:1}} value={link} onChange={e=>updLink(i,e.target.value)} placeholder="https://…"/><button className="q-btn-ghost" style={{padding:"0 12px"}} onClick={()=>rmLink(i)}>✕</button></div>)}<button className="q-btn-ghost" style={{marginTop:8,fontSize:12}} onClick={addLink}>+ Add Link</button></Field><FormActions onCancel={onCancel} onSubmit={()=>data.version?.trim()&&onSubmit(data)} submitLabel="Log Version"/></div>);
 }
 function MilestoneForm({data,setData,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>Add Milestone</h2><Field label="Title *"><input className="q-input" value={data.title||""} onChange={e=>set("title",e.target.value)} placeholder="e.g., Submit to Play Store"/></Field><Field label="Target Date"><input type="date" className="q-input" value={data.date||""} onChange={e=>set("date",e.target.value)}/></Field><Field label="Description"><QTextarea className="q-input" style={{height:72,resize:"vertical"}} value={data.description||""} onChange={e=>set("description",e.target.value)} placeholder="Optional…"/></Field><FormActions onCancel={onCancel} onSubmit={()=>data.title?.trim()&&onSubmit(data)} submitLabel="Add Milestone"/></div>);}
 function NoteForm({data,setData,title,onSubmit,onCancel}){const set=(k,v)=>setData(d=>({...d,[k]:v}));return(<div><h2 style={s.modalTitle}>{title}</h2><Field label="Content *"><QTextarea className="q-input" style={{height:160,resize:"vertical"}} autoFocus value={data.content||""} onChange={e=>set("content",e.target.value)} placeholder="Write your note…"/></Field><FormActions onCancel={onCancel} onSubmit={()=>data.content?.trim()&&onSubmit(data)} submitLabel="Save Note"/></div>);}
