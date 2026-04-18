@@ -16,7 +16,6 @@ function useIsMobile() {
 function usePullToRefresh(onRefresh){
   useEffect(()=>{
     let startY=0,pulling=false,indicator=null;
-    const THRESHOLD=70;
 
     const createIndicator=()=>{
       const el=document.createElement("div");
@@ -27,13 +26,17 @@ function usePullToRefresh(onRefresh){
       return el;
     };
 
-    const onTouchStart=e=>{startY=e.touches[0].clientY;pulling=window.scrollY===0||document.documentElement.scrollTop===0;};
+    let startX=0;
+    const THRESHOLD=90; // raised from 70
+    const onTouchStart=e=>{startY=e.touches[0].clientY;startX=e.touches[0].clientX;pulling=window.scrollY===0||document.documentElement.scrollTop===0;};
     const onTouchMove=e=>{
       if(!pulling)return;
       const dy=e.touches[0].clientY-startY;
-      if(dy<10)return;
+      const dx=Math.abs(e.touches[0].clientX-startX);
+      // Cancel if horizontal swipe (tabs) — require dy > 2*dx to be clearly vertical
+      if(dx>20||dy<20||dy<dx*2){pulling=false;return;}
       if(!indicator)indicator=createIndicator();
-      const pct=Math.min(dy/THRESHOLD,1);
+      const pct=Math.min(dy/90,1);
       indicator.style.opacity=String(pct);
       indicator.textContent=pct>=1?"↑ Release to refresh":"↓ Pull to refresh";
     };
@@ -54,7 +57,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.4";
+const APP_VER    = "v0.9.5";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -963,10 +966,17 @@ export default function QoderApp() {
   };
 
   // ── Global Workspace (localStorage) ──────────────────────────────────────────
-  const [workspace,setWorkspace]=useState(()=>{
-    try{const d=JSON.parse(localStorage.getItem("q-workspace")||"{}");return{notes:d.notes||[],ideas:d.ideas||[],snippets:d.snippets||[]};}catch{return{notes:[],ideas:[],snippets:[]};}
-  });
-  const saveWorkspace=(next)=>{setWorkspace(next);try{localStorage.setItem("q-workspace",JSON.stringify(next));}catch{}};
+  const [workspace,setWorkspace]=useState({notes:[],ideas:[],snippets:[]});
+  // Save workspace to Supabase user_settings (syncs across devices) + localStorage fallback
+  const saveWorkspace=async(next)=>{
+    setWorkspace(next);
+    // Persist to localStorage immediately for offline resilience
+    try{localStorage.setItem("q-workspace",JSON.stringify(next));}catch{}
+    // Async upsert to Supabase if session exists
+    if(session?.access_token&&cfg?.url){
+      try{await sb.upsertSettings(cfg.url,cfg.key,session.access_token,session.user.id,{workspace_data:next});}catch{}
+    }
+  };
   const addWorkspaceNote=(content)=>saveWorkspace({...workspace,notes:[{id:Date.now()+"",content,pinned:false,createdAt:new Date().toISOString()},...workspace.notes]});
   const pinWorkspaceNote=(id)=>saveWorkspace({...workspace,notes:workspace.notes.map(n=>n.id===id?{...n,pinned:!n.pinned}:n)});
   const editWorkspaceNote=(id,content)=>saveWorkspace({...workspace,notes:workspace.notes.map(n=>n.id===id?{...n,content}:n)});
@@ -1027,6 +1037,8 @@ export default function QoderApp() {
               if(sett?.[0]?.custom_statuses)setCustomStatuses(sett[0].custom_statuses||{});
               if(sett?.[0]?.theme&&sett[0].theme!=="dark"){saveTheme(sett[0].theme);}
               if(sett?.[0]?.accent_color&&sett[0].accent_color!=="#00D4FF"){saveAccent(sett[0].accent_color);}
+              if(sett?.[0]?.workspace_data){const wd=sett[0].workspace_data;setWorkspace({notes:wd.notes||[],ideas:wd.ideas||[],snippets:wd.snippets||[]});}
+              else{try{const d=JSON.parse(localStorage.getItem("q-workspace")||"{}");if(d.notes||d.ideas||d.snippets)setWorkspace({notes:d.notes||[],ideas:d.ideas||[],snippets:d.snippets||[]});}catch{}}
             }catch{}
             setScreen("app");return;
           }
@@ -1249,6 +1261,16 @@ export default function QoderApp() {
           if(sett?.[0]?.custom_statuses)setCustomStatuses(sett[0].custom_statuses||{});
           if(sett?.[0]?.theme&&sett[0].theme!=="dark"){saveTheme(sett[0].theme);}
           if(sett?.[0]?.accent_color&&sett[0].accent_color!=="#00D4FF"){saveAccent(sett[0].accent_color);}
+          // Load workspace data from Supabase (overrides localStorage if present)
+          if(sett?.[0]?.workspace_data){
+            const wd=sett[0].workspace_data;
+            const ws={notes:wd.notes||[],ideas:wd.ideas||[],snippets:wd.snippets||[]};
+            setWorkspace(ws);
+            try{localStorage.setItem("q-workspace",JSON.stringify(ws));}catch{}
+          } else {
+            // Fall back to localStorage for first-time or offline
+            try{const d=JSON.parse(localStorage.getItem("q-workspace")||"{}");if(d.notes||d.ideas||d.snippets)setWorkspace({notes:d.notes||[],ideas:d.ideas||[],snippets:d.snippets||[]});}catch{}
+          }
         }catch{}
         setScreen("app");
       }else if(isSignUp&&res.id){
@@ -2037,8 +2059,10 @@ export default function QoderApp() {
                           onDragStart={e=>{e.stopPropagation();onGroupDragStart(e,gi);}}
                           style={{color:"var(--txt-dim)",fontSize:10,userSelect:"none",flexShrink:0,cursor:"grab",padding:"2px 0"}}>⠿</span>
                         {g.color&&<span style={{width:7,height:7,borderRadius:"50%",background:g.color,flexShrink:0}}/>}
-                        <span style={{fontSize:10,fontWeight:700,letterSpacing:"1.2px",color:g.color||"var(--txt-faint)",textTransform:"uppercase",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",opacity:g.color?0.9:1}}>{g.name}</span>
-                        <button onClick={e=>{e.stopPropagation();openModal("edit-group",{...g});}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:11,padding:"0 3px",lineHeight:1}} title="Edit group">✎</button>
+                        <span onContextMenu={e=>{e.preventDefault();openModal("edit-group",{...g});}} onClick={isMobile?undefined:undefined} onPointerDown={isMobile?(()=>{const t=setTimeout(()=>openModal("edit-group",{...g}),600);return()=>clearTimeout(t);}):undefined} style={{fontSize:10,fontWeight:700,letterSpacing:"1.2px",color:g.color||"var(--txt-faint)",textTransform:"uppercase",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",opacity:g.color?0.9:1,cursor:isMobile?"pointer":"default"}} title={isMobile?"Hold to edit group":""}>{g.name}</span>
+                        {isMobile?null:<button onClick={e=>{e.stopPropagation();openModal("edit-group",{...g});}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:11,padding:"0 3px",lineHeight:1}} title="Edit group">✎</button>}
+                        {isMobile&&gi>0&&<button onClick={e=>{e.stopPropagation();const n=[...groups];[n[gi-1],n[gi]]=[n[gi],n[gi-1]];reorderGroups(n);}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:12,padding:"0 2px",lineHeight:1}} title="Move up">▲</button>}
+                        {isMobile&&gi<grouped.length-1&&<button onClick={e=>{e.stopPropagation();const n=[...groups];[n[gi],n[gi+1]]=[n[gi+1],n[gi]];reorderGroups(n);}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:12,padding:"0 2px",lineHeight:1}} title="Move down">▼</button>}
                         <button onClick={async e=>{e.stopPropagation();if(await qConfirm(`Delete group "${g.name}"? Projects will be ungrouped.`))deleteGroup(g.id);}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:11,padding:"0 2px",lineHeight:1}} className="q-group-del">✕</button>
                       </div>
                       {/* Projects within group — use DraggableSidebarList for reordering */}
@@ -2594,11 +2618,11 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
     <div style={{...s.page,padding:isMobile?"16px 14px":"36px 40px"}}>
       <div style={{...s.pageHead,marginBottom:isMobile?16:24}}>
         <div><h1 style={{...s.pageTitle,fontSize:isMobile?20:27}}>Dashboard</h1><p style={s.pageSub}>Cloud-synced across all devices</p></div>
-        <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
-          <button className="q-btn-ghost" style={{padding:"8px 12px",fontSize:12}} onClick={onCmdPalette} title="Ctrl+K">⌘ Quick Search</button>
+        <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end",maxWidth:isMobile?"50%":"none"}}>
+          <button className="q-btn-ghost" style={{padding:"8px 10px",fontSize:12,display:"flex",alignItems:"center",gap:isMobile?0:5}} onClick={onCmdPalette} title="Quick Search">{isMobile?<SearchIcon size={16}/>:<><SearchIcon size={13}/> Quick Search</>}</button>
           {!isMobile&&<button className="q-btn-ghost" style={{padding:"8px 12px",fontSize:12}} onClick={onExportAll}>Backup All</button>}
           {!isMobile&&<button className="q-btn-ghost" style={{padding:"8px 12px",fontSize:12}} onClick={onWeeklySummary}>Week Summary</button>}
-          <button className="q-btn-primary" style={{padding:isMobile?"7px 14px":"9px 18px",fontSize:isMobile?13:14}} onClick={onNew}>+ New Project</button>
+          {!isMobile&&<button className="q-btn-primary" style={{padding:"9px 18px",fontSize:14}} onClick={onNew}>+ New Project</button>}
         </div>
       </div>
 
