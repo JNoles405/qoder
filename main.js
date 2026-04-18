@@ -54,6 +54,19 @@ ipcMain.handle('open-html-in-browser', async (_, html) => {
   }
 });
 
+// Compare x.y.z strings — true iff a is strictly greater than b.
+function isNewer(a, b) {
+  if (!a || !b) return false;
+  const A = a.split('.').map(n => parseInt(n, 10) || 0);
+  const B = b.split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const x = A[i] || 0, y = B[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
 // Check only — returns {status, version?} without starting download
 ipcMain.handle('check-for-updates', async () => {
   if (!autoUpdater) return { status: 'error', message: 'Dev build — updater disabled.' };
@@ -62,8 +75,9 @@ ipcMain.handle('check-for-updates', async () => {
     const result = await autoUpdater.checkForUpdates();
     const latest  = result?.updateInfo?.version;
     const current = app.getVersion();
-    log.info('IPC check-for-updates: result', { latest, current });
-    if (latest && latest !== current) return { status: 'available', version: latest };
+    const available = isNewer(latest, current);
+    log.info('IPC check-for-updates: result', { latest, current, available });
+    if (available) return { status: 'available', version: latest };
     return { status: 'not-available', version: current };
   } catch (err) {
     log.error('IPC check-for-updates: failed', err);

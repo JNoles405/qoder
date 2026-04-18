@@ -973,7 +973,7 @@ export default function QoderApp() {
     const cleanP  = window.electronAPI.onUpdateProgress?.((_,pct)=>{setUpdateStatus("downloading");setDownloadPct(pct||0);});
     const cleanR  = window.electronAPI.onUpdateReady((_,v)=>{console.log("[updater] ready",v);setUpdateStatus("ready");});
     const cleanN  = window.electronAPI.onUpdateNotAvailable?.(()=>setUpdateStatus(s=>s==="downloading"||s==="ready"?s:"current"));
-    const cleanE  = window.electronAPI.onUpdateError?.((_,msg)=>{setUpdateError(msg||"Update error");setUpdateStatus(s=>s==="downloading"||s==="ready"?s:"error");});
+    const cleanE  = window.electronAPI.onUpdateError?.((_,msg)=>{setUpdateError(msg||"Update error");setUpdateStatus(s=>s==="ready"?s:"error");setDownloadPct(0);});
     const cleanM  = window.electronAPI.onMenuCheckUpdates?.(()=>handleCheckForUpdates());
     return () => { cleanA?.(); cleanP?.(); cleanR?.(); cleanN?.(); cleanE?.(); cleanM?.(); };
   }, []);
