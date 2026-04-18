@@ -1,17 +1,17 @@
 {
   "name": "qoder",
-  "version": "0.9.13",
-  "description": "Track every build — version history, milestones, release links",
+  "version": "0.9.14",
+  "description": "Track every build \u2014 version history, milestones, release links",
   "main": "main.js",
   "homepage": "https://qoder.dev",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "npm run build && electron-builder",
-    "electron:mac": "npm run build && electron-builder --mac",
-    "electron:win": "npm run build && electron-builder --win --publish always",
-    "electron:linux": "npm run build && electron-builder --linux",
+    "electron:build": "npm run check:runtime-deps && npm run build && electron-builder",
+    "electron:mac": "npm run check:runtime-deps && npm run build && electron-builder --mac",
+    "electron:win": "npm run check:runtime-deps && npm run build && electron-builder --win --publish always",
+    "electron:linux": "npm run check:runtime-deps && npm run build && electron-builder --linux",
     "cap:sync": "npm run build && npx cap sync",
     "cap:android": "npm run cap:sync && npx cap open android",
     "cap:ios": "npm run cap:sync && npx cap open ios",
@@ -22,7 +22,7 @@
   "build": {
     "appId": "dev.qoder.app",
     "productName": "Qoder",
-    "copyright": "Copyright © 2026 Qoder",
+    "copyright": "Copyright \u00a9 2026 Qoder",
     "directories": {
       "output": "dist-electron"
     },
@@ -41,21 +41,47 @@
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.icns",
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] },
-        { "target": "zip", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ]
     },
     "win": {
       "icon": "assets/icon.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "linux": {
       "icon": "assets/icon.png",
       "category": "Development",
-      "target": ["AppImage", "deb", "rpm"]
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -84,5 +110,10 @@
     "wait-on": "^8.0.2",
     "@capacitor/cli": "^6.0.0",
     "@capacitor/assets": "^3.0.0"
-  }
+  },
+  "author": {
+    "name": "Benjamin J Noles",
+    "email": "benjaminjnoles@gmail.com"
+  },
+  "license": "UNLICENSED"
 }

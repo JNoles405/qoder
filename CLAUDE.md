@@ -13,6 +13,15 @@ These are required at **runtime in the packaged Electron main process**. They ar
 
 There is a build guard in place: `npm run check:runtime-deps` (invoked automatically before every `electron:build/mac/win/linux`) will fail the build if either module is missing from `node_modules`. Do not disable or remove that script.
 
+**Specifically, DO NOT change any of these four script lines** in `package.json`. The `npm run check:runtime-deps && ` prefix on each one is load-bearing — it's what actually runs the guard. An automated tool removed it once and shipped a broken installer:
+
+```json
+"electron:build": "npm run check:runtime-deps && npm run build && electron-builder",
+"electron:mac":   "npm run check:runtime-deps && npm run build && electron-builder --mac",
+"electron:win":   "npm run check:runtime-deps && npm run build && electron-builder --win --publish always",
+"electron:linux": "npm run check:runtime-deps && npm run build && electron-builder --linux",
+```
+
 If you legitimately need to remove one of these deps, also remove its `require(...)` call from `main.js` in the same change, and update this file.
 
 ## Process split
@@ -26,7 +35,17 @@ When adding a dependency, ask: does `main.js` or `preload.js` use it? If yes →
 ## NSIS installer customization
 
 - `build/installer.nsh` is referenced by `package.json` `build.nsis.include`. It force-kills any orphaned `Qoder.exe` processes (GPU, renderer, crashpad helper, etc.) before install/uninstall so upgrades don't fail with "can't close Qoder".
-- Do NOT delete `build/installer.nsh` or remove the `"include"` line from `nsis` config.
+- Do NOT delete `build/installer.nsh` or remove the `"include"` line from `nsis` config. The `nsis` block in `package.json` must contain all three of these keys:
+
+```json
+"nsis": {
+  "oneClick": false,
+  "allowToChangeInstallationDirectory": true,
+  "include": "build/installer.nsh"
+}
+```
+
+An automated tool removed the `"include"` line once, which silently disabled the fix — users started hitting "can't close Qoder" again on upgrades. If you're editing the `nsis` block for any reason, the `"include"` line stays.
 
 ## Auto-updater
 

@@ -82,7 +82,7 @@ function _usePullToRefreshDisabled(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.13";
+const APP_VER    = "v0.9.14";
 const POLL_MS    = 3000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -2209,7 +2209,7 @@ export default function QoderApp() {
 
       {/* Main */}
       <main style={s.main}>
-        {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"var(--txt)"}}>oder</span></div><div style={{display:"flex",gap:8,alignItems:"center"}}><button onClick={doRefresh} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-muted)",padding:"4px 6px",display:"flex",alignItems:"center",transition:"color .15s"}} title="Refresh" onMouseEnter={e=>e.currentTarget.style.color="var(--accent-text)"} onMouseLeave={e=>e.currentTarget.style.color="var(--txt-muted)"}><RefreshIcon size={18}/></button><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div></div>}
+        {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"var(--txt)"}}>oder</span></div><div style={{display:"flex",gap:8,alignItems:"center"}}><RefreshBtn onRefresh={doRefresh}/><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div></div>}
 
         {view==="workspace"&&<WorkspaceView
             workspace={workspace}
@@ -2452,6 +2452,21 @@ function AuthScreen({onAuth,busy,onReset}){
   </div></div>);
 }
 
+// ── RefreshBtn ───────────────────────────────────────────────────────────────
+function RefreshBtn({onRefresh}){
+  const [spinning,setSpinning]=useState(false);
+  const handle=()=>{
+    if(spinning)return;
+    setSpinning(true);
+    Promise.resolve(onRefresh()).finally(()=>setTimeout(()=>setSpinning(false),700));
+  };
+  return(
+    <button onClick={handle} style={{background:"none",border:"none",cursor:"pointer",color:spinning?"var(--accent-text)":"var(--txt-muted)",padding:"4px 6px",display:"flex",alignItems:"center",transition:"color .2s"}} title="Refresh">
+      <span style={{display:"flex",animation:spinning?"q-spin .7s linear 1":"none",transformOrigin:"center"}}><RefreshIcon size={18}/></span>
+    </button>
+  );
+}
+
 // ── NavBtn ────────────────────────────────────────────────────────────────────
 function NavBtn({active,onClick,icon,label,small,folder,projectColor}){
   const hasFolder=!!window.electronAPI?.openFolder&&!!folder;
@@ -2521,7 +2536,7 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onPinNote,on
   const [snippetLang,setSnippetLang]=useState("javascript");
   const [showSnippetForm,setShowSnippetForm]=useState(false);
 
-  const LANGS=["javascript","typescript","python","bash","sql","html","css","json","kotlin","swift","rust","go","other"];
+  // Use same sorted language list as project snippets
 
   return(
     <div style={{...s.page,padding:isMobile?"16px 14px":"36px 40px"}}>
@@ -2595,7 +2610,7 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onPinNote,on
       {tab==="ideas"&&(
         <div>
           <div style={{background:"var(--bg-card)",border:"1px solid var(--border-md)",borderRadius:10,padding:14,marginBottom:20}}>
-            <QTextarea className="q-input" style={{minHeight:70,resize:"vertical",marginBottom:8}} value={ideaText} onChange={e=>setIdeaText(e.target.value)} placeholder="Capture an idea — app concept, feature, or anything worth remembering…" onKeyDown={e=>{if(e.key==="Enter"&&e.ctrlKey&&ideaText.trim()){onAddIdea(ideaText.trim());setIdeaText("");}}}/>
+            <QTextarea className="q-input" style={{minHeight:80,resize:"vertical",marginBottom:8}} value={ideaText} onChange={e=>setIdeaText(e.target.value)} placeholder="Capture an idea — app concept, feature, or anything worth remembering…" onKeyDown={e=>{if(e.key==="Enter"&&e.ctrlKey&&ideaText.trim()){onAddIdea(ideaText.trim());setIdeaText("");}}}/>
             <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
               <span style={{...s.mono10,color:"var(--txt-faint)",alignSelf:"center"}}>Ctrl+Enter to save</span>
               <button className="q-btn-primary" style={{padding:"7px 20px"}} onClick={()=>{if(ideaText.trim()){onAddIdea(ideaText.trim());setIdeaText("");}}} disabled={!ideaText.trim()}>Capture Idea</button>
@@ -2636,7 +2651,7 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onPinNote,on
               <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
                 <QInput className="q-input" style={{flex:1,minWidth:200,marginTop:0}} value={snippetTitle} onChange={e=>setSnippetTitle(e.target.value)} placeholder="Snippet title…"/>
                 <select className="q-input" style={{width:140,marginTop:0}} value={snippetLang} onChange={e=>setSnippetLang(e.target.value)}>
-                  {LANGS.map(l=><option key={l} value={l}>{l}</option>)}
+                  {SNIPPET_LANGUAGES.map(l=><option key={l} value={l}>{l}</option>)}
                 </select>
               </div>
               <QTextarea className="q-input" style={{minHeight:120,resize:"vertical",fontFamily:"'JetBrains Mono'",fontSize:12,marginBottom:10}} value={snippetContent} onChange={e=>setSnippetContent(e.target.value)} placeholder="Paste your code here…"/>
@@ -3176,16 +3191,16 @@ function TodoTab({project,onAdd,onToggle,onDelete,onClearDone,onReorder,sprints,
   };
   return(
     <div>
-      <div style={s.tabBar}>
-        <span style={s.mono12}>{done.length}/{todos.length} completed</span>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{padding:"10px 0 8px",display:"flex",flexDirection:"column",gap:8}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={s.mono12}>{done.length}/{todos.length} completed</span>
           {checklistTemplates?.length>0&&<div style={{display:"flex",gap:4,alignItems:"center"}}>
-            <select className="q-input" style={{width:150,marginTop:0,fontSize:11,padding:"5px 8px"}} value="" onChange={e=>{if(e.target.value)onApplyChecklist(e.target.value);}}>
+            <select className="q-input" style={{width:140,marginTop:0,fontSize:11,padding:"4px 8px"}} value="" onChange={e=>{if(e.target.value)onApplyChecklist(e.target.value);}}>
               <option value="">+ Checklist…</option>
               {checklistTemplates.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
             {onDeleteChecklist&&<div style={{position:"relative"}} className="q-checklist-del-wrap">
-              <button className="q-btn-ghost" style={{padding:"5px 8px",fontSize:11,color:"var(--txt-muted)"}} title="Manage checklists" onClick={e=>{e.currentTarget.nextSibling.style.display=e.currentTarget.nextSibling.style.display==="block"?"none":"block";}}>⚙</button>
+              <button className="q-btn-ghost" style={{padding:"4px 8px",fontSize:11,color:"var(--txt-muted)"}} title="Manage checklists" onClick={e=>{e.currentTarget.nextSibling.style.display=e.currentTarget.nextSibling.style.display==="block"?"none":"block";}}>⚙</button>
               <div style={{display:"none",position:"absolute",top:"100%",right:0,zIndex:200,background:"var(--bg-modal)",border:"1px solid var(--border-md)",borderRadius:8,padding:"6px 0",minWidth:180,boxShadow:"0 4px 20px rgba(0,0,0,.3)"}}>
                 {checklistTemplates.map(t=>(
                   <div key={t.id} style={{display:"flex",alignItems:"center",padding:"6px 12px",gap:8}}>
@@ -3196,11 +3211,13 @@ function TodoTab({project,onAdd,onToggle,onDelete,onClearDone,onReorder,sprints,
               </div>
             </div>}
           </div>}
+        </div>
+        {(done.length>0||pending.length>0||otherProjects.length>0)&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {done.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11,color:"#FF6B9D"}} onClick={async()=>{if(await qConfirm(`Delete all ${done.length} completed todos?`)){if(onClearDone)onClearDone(done.map(t=>t.id));else done.forEach(t=>onDelete(t.id));}}}>Clear Done</button>}
           {pending.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={async()=>{if(await qConfirm(`Mark all ${pending.length} open todos as complete?`))pending.forEach(t=>onToggle(t.id));}}>Complete All</button>}
-          {pending.length>0&&onApplyChecklist&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} title="Save open todos as reusable checklist" onClick={()=>{setTemplateName("");setShowSaveTemplate(true);}}>Save as Checklist</button>}
-          {otherProjects.length>0&&<button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12}} onClick={()=>setShowClone(v=>!v)}>Clone to Project…</button>}
-        </div>
+          {pending.length>0&&onApplyChecklist&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={()=>{setTemplateName("");setShowSaveTemplate(true);}}>Save as Checklist</button>}
+          {otherProjects.length>0&&<button className="q-btn-ghost" style={{padding:"5px 10px",fontSize:11}} onClick={()=>setShowClone(v=>!v)}>Clone to Project…</button>}
+        </div>}
       </div>
       {showSaveTemplate&&(
         <div style={{display:"flex",gap:8,marginBottom:14,padding:"10px 14px",background:"var(--bg-input)",border:"1px solid var(--border-md)",borderRadius:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -3422,14 +3439,16 @@ function IssuesTab({project,onAdd,onFix,onDelete,onUpdatePriority,onUploadScreen
 
   return(
     <div>
-      <div style={s.tabBar}>
-        <span style={s.mono12}>{open.length} open · {fixed.length} fixed</span>
-        <div style={{display:"flex",gap:8}}>
+      <div style={{padding:"10px 0 8px",display:"flex",flexDirection:"column",gap:6}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={s.mono12}>{open.length} open · {fixed.length} fixed</span>
           <div style={{display:"flex",borderRadius:6,overflow:"hidden",border:"1px solid var(--border-md)"}}>
-            {["list","kanban"].map(m=><button key={m} onClick={()=>setViewMode(m)} style={{padding:"5px 12px",fontSize:11,background:viewMode===m?"var(--accent-dim)":"transparent",color:viewMode===m?"var(--accent-text)":"var(--txt-muted)",border:"none",cursor:"pointer",fontFamily:"'Syne'",fontWeight:600,textTransform:"capitalize"}}>{m==="list"?"≡ List":"⊞ Board"}</button>)}
+            {["list","kanban"].map(m=><button key={m} onClick={()=>setViewMode(m)} style={{padding:"5px 10px",fontSize:13,background:viewMode===m?"var(--accent-dim)":"transparent",color:viewMode===m?"var(--accent-text)":"var(--txt-muted)",border:"none",cursor:"pointer"}} title={m==="list"?"List view":"Board view"}>{m==="list"?"≡":"⊞"}</button>)}
           </div>
-          <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12}} onClick={()=>exportIssuesCSV(project)}>Export CSV</button>
-          <button className="q-btn-primary" onClick={onAdd}>+ Log Issue</button>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button className="q-btn-primary" style={{flex:1,whiteSpace:"nowrap"}} onClick={onAdd}>+ Log Issue</button>
+          <button className="q-btn-ghost" style={{padding:"7px 11px",fontSize:12,whiteSpace:"nowrap"}} onClick={()=>exportIssuesCSV(project)}>Export CSV</button>
         </div>
       </div>
       {issues.length===0&&<div style={s.empty}><p>No issues logged. 🎉</p></div>}
@@ -3712,7 +3731,7 @@ function TimeTab({project,onStart,onStop,onDelete,pomMode,setPomMode,pomSecs,set
   return(
     <div>
       <div style={s.tabBar}>
-        <span style={s.mono12}>Total: {fmtDuration(totalSeconds)} · Today: {fmtDuration(todaySeconds)}</span>
+        <span style={s.mono12}>Total: {fmtDurationLong(totalSeconds)} · Today: {fmtDurationLong(todaySeconds)}</span>
         <div style={{display:"flex",gap:6}}>
           <button className={`q-chip${view==="timer"?" q-chip-on":""}`} onClick={()=>setView("timer")}>Stopwatch</button>
           <button className={`q-chip${view==="pomodoro"?" q-chip-on":""}`} onClick={()=>setView("pomodoro")}>Pomodoro</button>
@@ -3780,14 +3799,14 @@ function TimeTab({project,onStart,onStop,onDelete,pomMode,setPomMode,pomSecs,set
               <div key={date}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                   <span style={{fontFamily:"'Syne'",fontWeight:700,color:"var(--txt)",fontSize:13}}>{date}</span>
-                  <span style={{...s.mono10,color:"var(--txt-muted)"}}>{fmtDuration(dayTotal)}</span>
+                  <span style={{...s.mono10,color:"var(--txt-muted)"}}>{fmtDurationLong(dayTotal)}</span>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
                   {daySessions.map(se=>(
                     <div key={se.id} className="q-ms-row" style={{padding:"8px 10px"}}>
                       <div style={{flex:1}}>
                         <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                          <span style={{fontFamily:"'JetBrains Mono'",fontSize:13,fontWeight:700,color:"var(--accent)"}}>{fmtDuration(se.durationSeconds)}</span>
+                          <span style={{fontFamily:"'JetBrains Mono'",fontSize:13,fontWeight:700,color:"var(--accent)"}}>{fmtDurationLong(se.durationSeconds)}</span>
                           {se.note&&<span style={{fontSize:13,color:"var(--txt-sub)"}}>{se.note}</span>}
                         </div>
                         <p style={{...s.mono10,marginTop:3,color:"var(--txt-faint)"}}>{new Date(se.startedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} → {new Date(se.endedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</p>
@@ -5186,6 +5205,7 @@ const css=`
     cursor:pointer;
     opacity:0.8;
   }
+  @keyframes q-spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
   ::-webkit-scrollbar{width:4px;height:4px;}::-webkit-scrollbar-track{background:var(--bg,#0A0E1A);}::-webkit-scrollbar-thumb{background:var(--scrollbar,#1E2540);border-radius:2px;}
   button{cursor:pointer;border:none;background:none;font-family:'Syne',sans-serif;}a{text-decoration:none;}
   audio{accent-color:#00D4FF;}
