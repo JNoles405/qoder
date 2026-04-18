@@ -35,6 +35,7 @@ When adding a dependency, ask: does `main.js` or `preload.js` use it? If yes →
 ## NSIS installer customization
 
 - `build/installer.nsh` is referenced by `package.json` `build.nsis.include`. It force-kills any orphaned `Qoder.exe` processes (GPU, renderer, crashpad helper, etc.) before install/uninstall so upgrades don't fail with "can't close Qoder".
+- **The install-side macro MUST be `preInit`, NOT `customInit`.** `customInit` runs AFTER electron-builder's `CHECK_APP_RUNNING` macro inside `.onInit`, which means the "can't close Qoder" check has already fired by the time our taskkill would run — the fix would silently do nothing. `preInit` fires before `initMultiUser`/`CHECK_APP_RUNNING`, so it's the only correct hook. The uninstaller side uses `customUnInit` (no `preUnInit` macro exists).
 - Do NOT delete `build/installer.nsh` or remove the `"include"` line from `nsis` config. The `nsis` block in `package.json` must contain all three of these keys:
 
 ```json
