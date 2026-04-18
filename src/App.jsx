@@ -14,6 +14,10 @@ function useIsMobile() {
 
 // Pull-to-refresh for mobile (Capacitor WebView)
 function usePullToRefresh(onRefresh){
+  // Disabled — replaced by refresh icon in mobile header
+  void onRefresh;
+}
+function _usePullToRefreshDisabled(onRefresh){
   // Pull-to-refresh: only fires when at the very top, requires deliberate downward pull
   // with minimal horizontal movement. The refresh FAB is the primary mobile refresh method.
   useEffect(()=>{
@@ -78,8 +82,8 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.10";
-const POLL_MS    = 10000;
+const APP_VER    = "v0.9.11";
+const POLL_MS    = 3000;
 const STORAGE_BUCKET = "qoder-files";
 
 const STATUS_CONFIG = {
@@ -918,7 +922,8 @@ export default function QoderApp() {
       setProjects(pjs);showToast("Refreshed","ok");
     }catch{}
   },[cfg,session]);
-  usePullToRefresh(isMobile?doRefresh:async()=>{});
+  // Pull-to-refresh removed — refresh icon in mobile header instead
+  void doRefresh;
 
   const saveTheme=(t)=>{
     setTheme(t);
@@ -1177,6 +1182,20 @@ export default function QoderApp() {
         const tags=await loadUserTags(cfg.url,cfg.key,session.access_token,session.user.id);
         setUserTags(tags);
         try{const grps2=await loadUserGroups(cfg.url,cfg.key,session.access_token,session.user.id);setGroups(grps2);}catch{}
+        // Sync workspace data from Supabase on every poll
+        try{
+          const sett=await sb.get(cfg.url,cfg.key,session.access_token,"user_settings",`?user_id=eq.${session.user.id}`);
+          if(sett?.[0]?.workspace_data){
+            const wd=sett[0].workspace_data;
+            setWorkspace(prev=>{
+              // Only update if data actually changed to avoid unnecessary re-renders
+              const next={notes:wd.notes||[],ideas:wd.ideas||[],snippets:wd.snippets||[]};
+              const prevStr=JSON.stringify({notes:prev.notes,ideas:prev.ideas,snippets:prev.snippets});
+              const nextStr=JSON.stringify(next);
+              return prevStr===nextStr?prev:next;
+            });
+          }
+        }catch{}
       }catch{}
     };
     // JWT token refresh every 45 minutes to prevent expiry
@@ -2178,7 +2197,7 @@ export default function QoderApp() {
 
       {/* Main */}
       <main style={s.main}>
-        {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"var(--txt)"}}>oder</span></div><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div>}
+        {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"var(--txt)"}}>oder</span></div><div style={{display:"flex",gap:8,alignItems:"center"}}><button onClick={()=>refresh()} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-muted)",padding:"4px",display:"flex",alignItems:"center"}} title="Refresh"><svg width="18" height="18" viewBox="0 0 20 20" fill="none"><path d="M3 10a7 7 0 0 1 7-7 7 7 0 0 1 5 2.1L17 3v5h-5l2-2a5 5 0 1 0 1 4.9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></button><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div></div>}
 
         {view==="workspace"&&<WorkspaceView
             workspace={workspace}
@@ -3213,16 +3232,16 @@ function TodoTab({project,onAdd,onToggle,onDelete,onClearDone,onReorder,sprints,
         <select className="q-input" style={{width:130,marginTop:0}} value={newPriority} onChange={e=>setNewPriority(e.target.value)}>
           {PRIORITY_KEYS.map(k=><option key={k} value={k}>{PRIORITY_CONFIG[k].icon} {PRIORITY_CONFIG[k].label}</option>)}
         </select>
-        <button className="q-btn-primary" style={{flexShrink:0,padding:"0 16px"}} onClick={handleAdd}>Add</button>
       </div>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,justifyContent:"space-between"}}>
         <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,color:"var(--txt-muted)"}}>
           <input type="checkbox" checked={newRecurring} onChange={e=>setNewRecurring(e.target.checked)} style={{accentColor:"#00D4FF"}}/>
           Recurring
+          {newRecurring&&<select className="q-input" style={{width:130,marginTop:0,fontSize:12,marginLeft:6}} value={newRecType} onChange={e=>setNewRecType(e.target.value)}>
+            {Object.entries(RECURRENCE_TYPES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+          </select>}
         </label>
-        {newRecurring&&<select className="q-input" style={{width:140,marginTop:0,fontSize:12}} value={newRecType} onChange={e=>setNewRecType(e.target.value)}>
-          {Object.entries(RECURRENCE_TYPES).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-        </select>}
+        <button className="q-btn-primary" style={{flexShrink:0,padding:"7px 20px"}} onClick={handleAdd}>Add To-Do</button>
       </div>
       {todos.length===0&&<div style={s.empty}><p>No to-do items yet.</p></div>}
       {pending.length>0&&<DraggableList items={pending} onReorder={r=>onReorder([...r,...done])}>{todo=><TodoRow todo={todo} activeSprints={activeSprints} onToggle={()=>onToggle(todo.id)} onDelete={async()=>{if(await qConfirm("Remove this item?"))onDelete(todo.id);}} onAssignSprint={sid=>onAssignSprint(todo.id,sid)} onDragTodo={onDragTodo}/>}</DraggableList>}
@@ -3269,15 +3288,15 @@ function NotesTab({project,onAdd,onEdit,onDelete,onReorder,onPin}){
   // Render function (not a component) — avoids React reconciliation crash from inner component definitions
   const renderNote=(note,draggable=false)=>(
     <div key={note.id} className="q-ver-card" style={{marginBottom:10,borderLeft:note.pinned?"2px solid #FFB347":"1px solid var(--border)",paddingLeft:14}}>
-      <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+      <div style={{display:"flex",gap:10,alignItems:"flex-start",flexWrap:"wrap"}}>
         {draggable&&!isSearching&&<span style={{color:"var(--txt-dim)",fontSize:18,cursor:"grab",userSelect:"none",flexShrink:0,marginTop:2}}>⠿</span>}
-        <div style={{flex:1,minWidth:0}}>
+        <div style={{flex:1,minWidth:"100%"}}>
           {mdMode
             ?<div style={{lineHeight:1.7}}>{renderMarkdown(note.content)}</div>
             :<p style={{color:"var(--txt-sub)",fontSize:14,lineHeight:1.75,whiteSpace:"pre-wrap"}}>{note.content}</p>
           }
         </div>
-        <div style={{display:"flex",gap:4,flexShrink:0}}>
+        <div style={{display:"flex",gap:4,flexShrink:0,marginLeft:"auto",flexWrap:"nowrap"}}>
           <button title={note.pinned?"Unpin":"Pin note"} onClick={()=>onPin&&onPin(note.id)} style={{background:"none",border:"none",cursor:"pointer",padding:"2px 4px",display:"flex",alignItems:"center"}}><PinIcon size={14} active={note.pinned}/></button>
           <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>{const blob=new Blob([note.content],{type:"text/markdown"});const u=URL.createObjectURL(blob);const a=document.createElement("a");a.href=u;a.download=`note-${new Date(note.createdAt).toISOString().slice(0,10)}.md`;a.click();URL.revokeObjectURL(u);}} title="Export as Markdown">↓ md</button>
           <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>onEdit(note)}>Edit</button>
