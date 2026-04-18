@@ -82,7 +82,7 @@ function _usePullToRefreshDisabled(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.11";
+const APP_VER    = "v0.9.13";
 const POLL_MS    = 3000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -304,6 +304,20 @@ function QTextarea({className="q-input",style,value,onChange,onKeyDown,placehold
   );
 }
 
+function RefreshIcon({size=16}){
+  return(
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{color:"currentColor",flexShrink:0}}>
+      {/* Bottom arc — counterclockwise left side */}
+      <path d="M4.5 15.5A8 8 0 0 0 12 20a8 8 0 0 0 7.5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+      {/* Arrow head bottom-left */}
+      <polyline points="2,13 4.5,15.5 7,13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+      {/* Top arc — clockwise right side */}
+      <path d="M19.5 8.5A8 8 0 0 0 12 4a8 8 0 0 0-7.5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+      {/* Arrow head top-right */}
+      <polyline points="22,11 19.5,8.5 17,11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    </svg>
+  );
+}
 function SearchIcon({size=14}){
   return(
     <svg width={size} height={size} viewBox="0 0 20 20" fill="none" style={{color:"currentColor",flexShrink:0}}>
@@ -922,8 +936,7 @@ export default function QoderApp() {
       setProjects(pjs);showToast("Refreshed","ok");
     }catch{}
   },[cfg,session]);
-  // Pull-to-refresh removed — refresh icon in mobile header instead
-  void doRefresh;
+  // Pull-to-refresh removed — refresh icon in mobile header handles this
 
   const saveTheme=(t)=>{
     setTheme(t);
@@ -2013,20 +2026,19 @@ export default function QoderApp() {
             {updateStatus==="ready"?(
   <>
                 <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:11,flexShrink:0}} onClick={()=>setUpdateStatus(null)}>Later</button>
-                <span style={{color:"#4ADE80",fontFamily:"'Syne'",fontWeight:600,fontSize:12,flex:1}}>✓ Ready to install</span>
                 <button className="q-btn-primary" style={{padding:"4px 14px",fontSize:12,background:"#4ADE80",color:"#06090F",flexShrink:0}} onClick={()=>window.electronAPI?.installUpdate?.()}>Restart & Update</button>
+                <span style={{color:"#4ADE80",fontFamily:"'Syne'",fontWeight:600,fontSize:12}}>✓ Ready to install</span>
               </>
             ):updateStatus==="available"?(
               <>
                 <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:11,flexShrink:0}} onClick={()=>setUpdateStatus(null)}>Later</button>
-                <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:12,flex:1}}>↓ Update available</span>
                 <button className="q-btn-primary" style={{padding:"4px 14px",fontSize:12,flexShrink:0}} onClick={()=>{setUpdateStatus("downloading");setDownloadPct(0);window.electronAPI?.startDownload?.();}}>Download Now</button>
+                <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:12}}>↓ Update available</span>
               </>
             ):(
               <>
                 <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:11,flexShrink:0}} onClick={()=>setUpdateStatus(null)}>Hide</button>
-                <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:12,flex:1}}>↓ Downloading… {downloadPct}%</span>
-                <span style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",flexShrink:0}}>{downloadPct<10?"Starting…":downloadPct<99?`${downloadPct}%`:"Finalizing…"}</span>
+                <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:12}}>↓ Downloading… {downloadPct<10?"Starting…":downloadPct<99?`${downloadPct}%`:"Finalizing…"}</span>
               </>
             )}
           </div>
@@ -2197,7 +2209,7 @@ export default function QoderApp() {
 
       {/* Main */}
       <main style={s.main}>
-        {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"var(--txt)"}}>oder</span></div><div style={{display:"flex",gap:8,alignItems:"center"}}><button onClick={()=>refresh()} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-muted)",padding:"4px",display:"flex",alignItems:"center"}} title="Refresh"><svg width="18" height="18" viewBox="0 0 20 20" fill="none"><path d="M3 10a7 7 0 0 1 7-7 7 7 0 0 1 5 2.1L17 3v5h-5l2-2a5 5 0 1 0 1 4.9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></button><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div></div>}
+        {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"var(--txt)"}}>oder</span></div><div style={{display:"flex",gap:8,alignItems:"center"}}><button onClick={doRefresh} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-muted)",padding:"4px 6px",display:"flex",alignItems:"center",transition:"color .15s"}} title="Refresh" onMouseEnter={e=>e.currentTarget.style.color="var(--accent-text)"} onMouseLeave={e=>e.currentTarget.style.color="var(--txt-muted)"}><RefreshIcon size={18}/></button><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div></div>}
 
         {view==="workspace"&&<WorkspaceView
             workspace={workspace}
@@ -4331,6 +4343,10 @@ function SettingsModal({tabOrder,userTags,onSave,onAddTag,onDeleteTag,onCancel,t
         <p style={{fontSize:12,color:"var(--txt-muted)",lineHeight:1.6}}>All settings sync across devices.<br/>Shortcuts: <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>Ctrl+←/→</span> tabs · <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>Ctrl+↑↓</span> projects · <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>Ctrl+Enter</span> submit · <span style={{fontFamily:"'JetBrains Mono'",color:"var(--txt-sub)"}}>F5</span> refresh</p>
       </div>
       <FormActions onCancel={handleCancel} onSubmit={handleSave} submitLabel="Save Settings"/>
+      <div style={{marginTop:12,textAlign:"center"}}>
+        <p style={{fontFamily:"'Syne'",fontSize:11,color:"var(--txt-faint)",lineHeight:1.7,margin:0}}>Made by Benjamin J Noles</p>
+        <p style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-faint)",margin:0}}>© 2026 Midnight Skies Dev</p>
+      </div>
     </div>
   );
 }
