@@ -57,7 +57,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.5";
+const APP_VER    = "v0.9.6";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -200,6 +200,7 @@ const FEED_META={
   "issue-fixed":{icon:"🐛",label:"Issue Fixed",   color:"#B47FFF"},
   sprint:       {icon:"◈",label:"Sprint Done",    color:"#B47FFF"},
   time:         {icon:"⏱",label:"Time Logged",    color:"var(--txt-muted)"},
+  "daily-log":  {icon:"📓",label:"Daily Log",     color:"#00D4FF"},
 };
 const TIME_PERIODS=[
   {key:"24h",label:"24h",ms:86400000},
@@ -384,8 +385,8 @@ function buildActivityFeed(projects){
     p.versions?.forEach(v=>items.push({type:"version",projectId:p.id,projectName:p.name,date:new Date(v.date),title:v.version,content:v.releaseNotes}));
     p.milestones?.filter(m=>m.completed).forEach(m=>items.push({type:"milestone",projectId:p.id,projectName:p.name,date:new Date(m.completedAt||m.date||m.createdAt),title:m.title,content:null}));
     p.todos?.filter(t=>t.completed&&t.completedAt).forEach(t=>items.push({type:"todo",projectId:p.id,projectName:p.name,date:new Date(t.completedAt),title:t.text,content:null}));
-    p.notes?.forEach(n=>items.push({type:"note",projectId:p.id,projectName:p.name,date:new Date(n.createdAt),title:null,content:n.content}));
     p.issues?.filter(i=>i.status==="fixed").forEach(i=>items.push({type:"issue-fixed",projectId:p.id,projectName:p.name,date:new Date(i.fixedAt||i.createdAt),title:i.title,content:i.fixDescription}));
+    p.dailyLogs?.forEach(d=>items.push({type:"daily-log",projectId:p.id,projectName:p.name,date:new Date(d.createdAt),title:null,content:d.content?.slice(0,120)}));
     p.sprints?.filter(sp=>sp.status==="completed").forEach(sp=>items.push({type:"sprint",projectId:p.id,projectName:p.name,date:new Date(sp.createdAt),title:sp.name,content:sp.goal}));
     p.timeSessions?.filter(s=>s.durationSeconds).forEach(s=>items.push({type:"time",projectId:p.id,projectName:p.name,date:new Date(s.startedAt),title:fmtDuration(s.durationSeconds),content:s.note}));
   });
@@ -857,9 +858,15 @@ export default function QoderApp() {
   const [accentColor,     setAccentColor]     = useState(()=>{try{return localStorage.getItem("q-accent")||"#00D4FF";}catch{return"#00D4FF";}});
   const [customStatuses,  setCustomStatuses]  = useState({});
   const isMobile = useIsMobile();
-  const projRef  = useRef(projects);
+  const projRef    = useRef(projects);
+  const sessionRef = useRef(null);
+  const cfgRef     = useRef(null);
+  const groupsRef  = useRef([]);
   const sidebarDragRef = useRef(null);
-  projRef.current = projects;
+  projRef.current    = projects;
+  sessionRef.current = session;
+  cfgRef.current     = cfg;
+  groupsRef.current  = groups;
 
   // JWT-aware API call wrapper — retries once after refresh on token expiry
   const apiCall=useCallback(async(fn)=>{
@@ -968,13 +975,14 @@ export default function QoderApp() {
   // ── Global Workspace (localStorage) ──────────────────────────────────────────
   const [workspace,setWorkspace]=useState({notes:[],ideas:[],snippets:[]});
   // Save workspace to Supabase user_settings (syncs across devices) + localStorage fallback
-  const saveWorkspace=async(next)=>{
+  const saveWorkspace=(next)=>{
     setWorkspace(next);
-    // Persist to localStorage immediately for offline resilience
     try{localStorage.setItem("q-workspace",JSON.stringify(next));}catch{}
-    // Async upsert to Supabase if session exists
-    if(session?.access_token&&cfg?.url){
-      try{await sb.upsertSettings(cfg.url,cfg.key,session.access_token,session.user.id,{workspace_data:next});}catch{}
+    // Use refs to avoid stale closure — reads latest session/cfg at call time
+    const sess=sessionRef?.current;
+    const c=cfgRef?.current;
+    if(sess?.access_token&&c?.url){
+      sb.upsertSettings(c.url,c.key,sess.access_token,sess.user.id,{workspace_data:next}).catch(()=>{});
     }
   };
   const addWorkspaceNote=(content)=>saveWorkspace({...workspace,notes:[{id:Date.now()+"",content,pinned:false,createdAt:new Date().toISOString()},...workspace.notes]});
@@ -1202,23 +1210,32 @@ export default function QoderApp() {
       }
       // Skip if typing in an input
       if(["INPUT","TEXTAREA","SELECT"].includes(document.activeElement?.tagName))return;
-      // Ctrl+Up / Ctrl+PgUp — previous project
+      // Ctrl+Up / Ctrl+PgUp — previous project (sidebar order)
       if(e.ctrlKey&&(e.key==="ArrowUp"||e.key==="PageUp")){
         e.preventDefault();
-        const pjs=projRef.current;
-        if(!pjs.length)return;
-        const idx=pjs.findIndex(p=>p.id===selProj?.id);
-        const next=pjs[Math.max(0,idx-1)];
+        // Build ordered list matching sidebar: grouped (by group order) then ungrouped, no archived
+        const all=projRef.current.filter(p=>p.status!=="archived");
+        const grpOrder=groupsRef.current||[];
+        const grouped=grpOrder.flatMap(g=>all.filter(p=>p.groupId===g.id));
+        const ungrouped=all.filter(p=>!p.groupId);
+        const ordered=[...grouped,...ungrouped];
+        if(!ordered.length)return;
+        const idx=ordered.findIndex(p=>p.id===selProj?.id);
+        const next=ordered[Math.max(0,idx-1)];
         if(next)openProject(next);
         return;
       }
-      // Ctrl+Down / Ctrl+PgDn — next project
+      // Ctrl+Down / Ctrl+PgDn — next project (sidebar order)
       if(e.ctrlKey&&(e.key==="ArrowDown"||e.key==="PageDown")){
         e.preventDefault();
-        const pjs=projRef.current;
-        if(!pjs.length)return;
-        const idx=pjs.findIndex(p=>p.id===selProj?.id);
-        const next=pjs[Math.min(pjs.length-1,idx+1)];
+        const all=projRef.current.filter(p=>p.status!=="archived");
+        const grpOrder=groupsRef.current||[];
+        const grouped=grpOrder.flatMap(g=>all.filter(p=>p.groupId===g.id));
+        const ungrouped=all.filter(p=>!p.groupId);
+        const ordered=[...grouped,...ungrouped];
+        if(!ordered.length)return;
+        const idx=ordered.findIndex(p=>p.id===selProj?.id);
+        const next=ordered[Math.min(ordered.length-1,idx+1)];
         if(next)openProject(next);
         return;
       }
@@ -2549,9 +2566,12 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onPinNote,on
       {/* Snippets */}
       {tab==="snippets"&&(
         <div>
-          {!showSnippetForm?(
-            <button className="q-btn-primary" style={{marginBottom:20}} onClick={()=>setShowSnippetForm(true)}>+ Add Snippet</button>
-          ):(
+          {!showSnippetForm&&(
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:20}}>
+              <button className="q-btn-primary" onClick={()=>setShowSnippetForm(true)}>+ Add Snippet</button>
+            </div>
+          )}
+          {showSnippetForm&&(
             <div style={{background:"var(--bg-card)",border:"1px solid var(--border-md)",borderRadius:10,padding:16,marginBottom:20}}>
               <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
                 <QInput className="q-input" style={{flex:1,minWidth:200,marginTop:0}} value={snippetTitle} onChange={e=>setSnippetTitle(e.target.value)} placeholder="Snippet title…"/>
