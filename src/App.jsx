@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.3";
+const APP_VER    = "v0.9.4";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -2117,10 +2117,13 @@ export default function QoderApp() {
             onAddNote={addWorkspaceNote}
             onEditNote={editWorkspaceNote}
             onDeleteNote={deleteWorkspaceNote}
+            onPinNote={pinWorkspaceNote}
             onAddIdea={addWorkspaceIdea}
             onDeleteIdea={deleteWorkspaceIdea}
+            onPinIdea={pinWorkspaceIdea}
             onAddSnippet={addWorkspaceSnippet}
             onDeleteSnippet={deleteWorkspaceSnippet}
+            onPinSnippet={pinWorkspaceSnippet}
             onToast={(m,t)=>showToast(m,t)}
             isMobile={isMobile}
           />}
@@ -2431,7 +2434,7 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onPinNote,on
       {/* Tab bar */}
       <div style={{display:"flex",gap:4,marginBottom:24,borderBottom:"1px solid var(--border)",paddingBottom:0}}>
         {[{key:"notes",label:"Notes",count:workspace.notes.length},{key:"ideas",label:"Ideas",count:workspace.ideas.length},{key:"snippets",label:"Snippets",count:workspace.snippets.length}].map(t=>(
-          <button key={t.key} onClick={()=>setTab(t.key)} style={{padding:"9px 18px",fontSize:13,background:"none",border:"none",borderBottom:tab===t.key?"2px solid var(--accent)":"2px solid transparent",color:tab===t.key?"var(--accent-text)":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",fontWeight:tab===t.key?700:600,transition:"all .15s",marginBottom:-1}}>
+          <button key={t.key} onClick={()=>setTab(t.key)} style={{padding:"9px 18px",fontSize:13,background:"none",border:"none",borderBottom:tab===t.key?"2px solid var(--accent)":"2px solid transparent",color:tab===t.key?"var(--accent-text)":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",fontWeight:500,transition:"all .15s",marginBottom:-1}}>
             {t.label}{t.count>0&&<span style={{...s.tabPill,marginLeft:6}}>{t.count}</span>}
           </button>
         ))}
@@ -2656,7 +2659,7 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:5}}>
             {contentResults.slice(0,12).map((r,i)=>{const meta=FEED_META[r.type]||FEED_META.note;return(
-              <div key={i} onClick={()=>onOpen(allProjects.find(p=>p.id===r.projectId)||{},r.tab)} style={{display:"flex",gap:10,padding:"10px 14px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:9,cursor:"pointer",alignItems:"flex-start",transition:"border-color .2s"}} className="q-card">
+              <div key={i} onClick={()=>onOpen(allProjects.find(p=>p.id===r.projectId)||{},r.tab)} style={{display:"flex",gap:10,padding:"10px 14px",border:"1px solid var(--border)",borderRadius:9,cursor:"pointer",alignItems:"flex-start"}} className="q-card">
                 <span style={{fontSize:11,color:meta.color,flexShrink:0,marginTop:1}}>{meta.icon}</span>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}>
@@ -2699,7 +2702,7 @@ function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFil
             feedItems.length===0?<div style={{...s.empty,padding:"28px 0"}}><p>No activity in this period.</p></div>:(
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
                 {feedItems.slice(0,30).map((item,i)=>{const meta=FEED_META[item.type]||FEED_META.note;return(
-                  <div key={i} onClick={()=>onOpen(allProjects.find(p=>p.id===item.projectId)||{})} style={{display:"flex",gap:12,padding:"11px 14px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,cursor:"pointer",alignItems:"flex-start"}} className="q-card">
+                  <div key={i} onClick={()=>onOpen(allProjects.find(p=>p.id===item.projectId)||{})} style={{display:"flex",gap:12,padding:"11px 14px",border:"1px solid var(--border)",borderRadius:10,cursor:"pointer",alignItems:"flex-start"}} className="q-card">
                     <div style={{width:26,height:26,borderRadius:6,background:`${meta.color}14`,border:`1px solid ${meta.color}28`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,flexShrink:0}}>{meta.icon}</div>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
@@ -2970,7 +2973,7 @@ function OverviewTab({project,latestVer,allProjectsList}){
       {items.length===0?<div style={s.empty}><p>No activity for this period.</p></div>:(
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
           {items.map(item=>{const meta=FEED_META[item.type]||FEED_META.note;return(
-            <div key={`${item.type}-${item.id}`} className="q-card" style={{display:"flex",gap:12,padding:"12px 14px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,alignItems:"flex-start"}}>
+            <div key={`${item.type}-${item.id}`} className="q-card" style={{display:"flex",gap:12,padding:"12px 14px",border:"1px solid var(--border)",borderRadius:10,alignItems:"flex-start"}}>
               <div style={{width:28,height:28,borderRadius:6,background:`${meta.color}14`,border:`1px solid ${meta.color}28`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0,marginTop:1}}>{meta.icon}</div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
