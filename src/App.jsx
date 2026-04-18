@@ -78,7 +78,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.8";
+const APP_VER    = "v0.9.10";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -1978,7 +1978,7 @@ export default function QoderApp() {
 
       {/* Update banner — unified with progress bar */}
       {(updateStatus==="available"||updateStatus==="downloading"||updateStatus==="ready")&&(
-        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:9999,background:updateStatus==="ready"?"rgba(6,20,15,.97)":"rgba(8,14,30,.97)",borderBottom:`1px solid ${updateStatus==="ready"?"#4ADE80":"var(--accent)"}`,padding:"0",display:"flex",flexDirection:"column"}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:9999,background:updateStatus==="ready"?"rgba(6,20,15,.97)":"rgba(8,14,30,.97)",borderBottom:`1px solid ${updateStatus==="ready"?"#4ADE80":"var(--accent)"}`,padding:"0",display:"flex",flexDirection:"column",height:32,WebkitAppRegion:"no-drag"}}>
           {/* Progress bar — animates while downloading */}
           {(updateStatus==="available"||updateStatus==="downloading")&&(
             <div style={{height:3,background:"var(--border)",width:"100%"}}>
@@ -1986,29 +1986,28 @@ export default function QoderApp() {
             </div>
           )}
           {(updateStatus==="downloading"||updateStatus==="ready")&&(
-            <div style={{height:4,background:"var(--border)",width:"100%",position:"relative"}}>
-              <div style={{height:4,background:updateStatus==="ready"?"#4ADE80":"var(--accent)",width:updateStatus==="ready"?"100%":`${downloadPct}%`,transition:"width .4s ease",borderRadius:0}}/>
+            <div style={{position:"absolute",bottom:0,left:0,right:0,height:2,background:"var(--border)"}}>
+              <div style={{height:2,background:updateStatus==="ready"?"#4ADE80":"var(--accent)",width:updateStatus==="ready"?"100%":`${downloadPct}%`,transition:"width .4s ease"}}/>
             </div>
           )}
-          <div style={{padding:"10px 20px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <div style={{padding:"0 12px",display:"flex",alignItems:"center",gap:10,height:32,position:"relative"}}>
             {updateStatus==="ready"?(
-              <>
-                <span style={{color:"#4ADE80",fontFamily:"'Syne'",fontWeight:700,fontSize:14}}>✓ Update ready — {downloadPct}% downloaded</span>
-                <button className="q-btn-primary" style={{padding:"6px 16px",fontSize:13,background:"#4ADE80",color:"#06090F"}} onClick={()=>window.electronAPI?.installUpdate?.()}>Restart & Update</button>
-                <button className="q-btn-ghost" style={{padding:"6px 12px",fontSize:12}} onClick={()=>setUpdateStatus(null)}>Later</button>
+  <>
+                <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:11,flexShrink:0}} onClick={()=>setUpdateStatus(null)}>Later</button>
+                <span style={{color:"#4ADE80",fontFamily:"'Syne'",fontWeight:600,fontSize:12,flex:1}}>✓ Ready to install</span>
+                <button className="q-btn-primary" style={{padding:"4px 14px",fontSize:12,background:"#4ADE80",color:"#06090F",flexShrink:0}} onClick={()=>window.electronAPI?.installUpdate?.()}>Restart & Update</button>
               </>
             ):updateStatus==="available"?(
               <>
-                <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:13}}>↓ Update available</span>
-                <button className="q-btn-primary" style={{padding:"6px 14px",fontSize:12}} onClick={()=>{setUpdateStatus("downloading");setDownloadPct(0);window.electronAPI?.startDownload?.();}}>Download Now</button>
-                <a href="https://github.com/JNoles405/qoder/releases/latest" target="_blank" rel="noreferrer" style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-muted)"}}>or download manually</a>
-                <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12,marginLeft:"auto"}} onClick={()=>setUpdateStatus(null)}>Later</button>
+                <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:11,flexShrink:0}} onClick={()=>setUpdateStatus(null)}>Later</button>
+                <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:12,flex:1}}>↓ Update available</span>
+                <button className="q-btn-primary" style={{padding:"4px 14px",fontSize:12,flexShrink:0}} onClick={()=>{setUpdateStatus("downloading");setDownloadPct(0);window.electronAPI?.startDownload?.();}}>Download Now</button>
               </>
             ):(
               <>
-                <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:13}}>↓ Downloading… {downloadPct}%</span>
-                <span style={{fontFamily:"'JetBrains Mono'",fontSize:11,color:"var(--txt-muted)"}}>{downloadPct<10?"Starting…":downloadPct<99?"In progress…":"Finalizing…"}</span>
-                <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:12,marginLeft:"auto"}} onClick={()=>setUpdateStatus(null)}>Hide</button>
+                <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:11,flexShrink:0}} onClick={()=>setUpdateStatus(null)}>Hide</button>
+                <span style={{color:"var(--accent)",fontFamily:"'Syne'",fontWeight:600,fontSize:12,flex:1}}>↓ Downloading… {downloadPct}%</span>
+                <span style={{fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--txt-muted)",flexShrink:0}}>{downloadPct<10?"Starting…":downloadPct<99?`${downloadPct}%`:"Finalizing…"}</span>
               </>
             )}
           </div>
@@ -2978,7 +2977,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
         })()}
       </div>}
       {tab==="overview"   &&<OverviewTab   project={project} latestVer={latVer}/>}
-      {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion} onDelete={onDeleteVersion} onChangelog={onChangelog}/>}
+      {tab==="versions"   &&<VersionsTab   project={project} onAdd={onAddVersion} onDelete={onDeleteVersion} onEdit={onEditVersion} onChangelog={onChangelog} onCompare={onCompare}/>}
       {tab==="milestones" &&<MilestonesTab project={project} onAdd={onAddMilestone} onToggle={onToggleMilestone} onDelete={onDeleteMilestone}/>}
       {tab==="sprints"    &&<SprintsTab    project={project} onAdd={onAddSprint} onUpdateStatus={onUpdateSprintStatus} onDelete={onDeleteSprint} onAssignTodo={onAssignTodoToSprint}/>}
       {tab==="todos"      &&<TodoTab       project={project} onAdd={onAddTodo}      onToggle={onToggleTodo}     onDelete={onDeleteTodo}     onClearDone={onClearDone} onReorder={onReorderTodos} sprints={project.sprints||[]} onAssignSprint={onAssignTodoToSprint} allProjects={allProjects||[]} onCloneTodos={onCloneTodos} checklistTemplates={checklistTemplates||[]} onApplyChecklist={onApplyChecklist} onSaveAsTemplate={onSaveAsTemplate} onDragTodo={onDragTodo} onDeleteChecklist={onDeleteChecklist}/>}
@@ -3000,6 +2999,7 @@ function ProjectView({project,tab,setTab,isMobile,tabOrder,userTags,githubData,o
 
 // ── Overview Tab ──────────────────────────────────────────────────────────────
 function OverviewTab({project,latestVer,allProjectsList}){
+  const isMobile=useIsMobile();
   const [sortDir,setSortDir]=useState("desc");
   const [period,setPeriod]=useState("all");
   const [search,setSearch]=useState("");
@@ -5114,7 +5114,7 @@ function ConfirmDialog({msg,onYes,onNo}){
   );
 }
 function Toast({msg,type}){const c={ok:{bg:"var(--toast-ok-bg)",border:"#4ADE80",text:"#4ADE80",icon:"✓"},err:{bg:"var(--toast-err-bg)",border:"#FF4466",text:"#FF7090",icon:"✕"},info:{bg:"var(--toast-info-bg)",border:"var(--accent)",text:"var(--accent)",icon:"ℹ"}}[type]||{bg:"var(--toast-ok-bg)",border:"#4ADE80",text:"#4ADE80",icon:"✓"};return<div style={{position:"fixed",bottom:24,right:24,zIndex:9999,background:c.bg,border:`1px solid ${c.border}`,color:c.text,padding:"10px 18px",borderRadius:9,fontSize:13,maxWidth:320,fontFamily:"'Syne'",fontWeight:600,boxShadow:"0 4px 24px rgba(0,0,0,.3)",lineHeight:1.5}}>{c.icon} {msg}</div>;}
-function Splash({msg}){return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--bg)"}}><span style={{color:"#00D4FF",fontFamily:"'JetBrains Mono'",fontSize:15,fontWeight:700,letterSpacing:1}}>{msg}</span></div>;}
+function Splash({msg}){return<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--bg)"}}><span style={{color:"#00D4FF",fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,letterSpacing:.5}}>{msg}</span></div>;}
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 const css=`
