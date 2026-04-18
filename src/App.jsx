@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.0";
+const APP_VER    = "v0.9.1";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -112,14 +112,14 @@ const PROJECT_COLORS    = ["","#00D4FF","#4ADE80","#FFB347","#FF6B9D","#B47FFF",
 // ── Theme palette ─────────────────────────────────────────────────────────────
 const THEMES = {
   dark: {
-    bg:       "#0A0E1A", bgSide:   "#0C1020", bgCard:   "#111627",
+    bg:       "#0A0E1A", bgSide:   "#0C1020", bgCard:   "#111627", bgCardHover: "#1A2240",
     bgInput:  "#0D1120", bgModal:  "#111627",
     border:   "#1A2040", borderMd: "#1E2540", borderLg: "#151C32",
     txt:      "#E8EAF6", txtSub:   "#8B8FA8", txtMuted: "#6B7290",
     txtFaint: "#4B5268", txtDim:   "#2E3558", txtGhost: "#2A304A",
   },
   light: {
-    bg:       "#D4D8E4", bgSide:   "#C8CCDA", bgCard:   "#DCE0EC",
+    bg:       "#D4D8E4", bgSide:   "#C8CCDA", bgCard:   "#DCE0EC", bgCardHover: "#E8ECF6",
     bgInput:  "#CDD1DE", bgModal:  "#DCE0EC",
     border:   "#9AA4BC", borderMd: "#8E98B4", borderLg: "#A8B2C8",
     txt:      "#080E1C", txtSub:   "#1E2C48", txtMuted: "#3A4A68",
@@ -135,7 +135,7 @@ function buildThemeCSS(themeName, accent="#00D4FF"){
   const accentText=isLight?"var(--txt-sub)":accent; // light mode: use readable dark text instead
   return `
 :root {
-  --bg:${t.bg}; --bg-side:${t.bgSide}; --bg-card:${t.bgCard};
+  --bg:${t.bg}; --bg-side:${t.bgSide}; --bg-card:${t.bgCard}; --bg-card-hover:${t.bgCardHover};
   --bg-input:${t.bgInput}; --bg-modal:${t.bgModal};
   --border:${t.border}; --border-md:${t.borderMd}; --border-lg:${t.borderLg};
   --txt:${t.txt}; --txt-sub:${t.txtSub}; --txt-muted:${t.txtMuted};
@@ -811,7 +811,7 @@ export default function QoderApp() {
   const [projects,    setProjects]    = useState([]);
   const [busy,        setBusy]        = useState(false);
   const [toast,       setToast]       = useState(null);
-  const [view,        setView]        = useState("dashboard");
+  const [view,        setView]        = useState("dashboard"); // dashboard|project|workspace
   const [selProj,     setSelProj]     = useState(null);
   const [projTab,     setProjTab]     = useState("overview");
 
@@ -836,6 +836,8 @@ export default function QoderApp() {
   const [cmdPalette,      setCmdPalette]      = useState(false);
   const [draggedTodo,     setDraggedTodo]     = useState(null); // {todo, sourcePid}
   const [dragOverPid,     setDragOverPid]     = useState(null);
+  const dragGroupIdxRef   = useRef(null); // App-level ref for group drag index
+  const draggingGroupsRef = useRef(null); // Holds the optimistic reordered array during drag
   const [jotPad,          setJotPad]          = useState(false);
   const [compareModal,    setCompareModal]    = useState(false);
   const [jotText,         setJotText]         = useState("");
@@ -960,6 +962,19 @@ export default function QoderApp() {
     try { localStorage.setItem("q-sidebar-c", next ? "1" : "0"); } catch {}
   };
 
+  // ── Global Workspace (localStorage) ──────────────────────────────────────────
+  const [workspace,setWorkspace]=useState(()=>{
+    try{const d=JSON.parse(localStorage.getItem("q-workspace")||"{}");return{notes:d.notes||[],ideas:d.ideas||[],snippets:d.snippets||[]};}catch{return{notes:[],ideas:[],snippets:[]};}
+  });
+  const saveWorkspace=(next)=>{setWorkspace(next);try{localStorage.setItem("q-workspace",JSON.stringify(next));}catch{}};
+  const addWorkspaceNote=(content)=>saveWorkspace({...workspace,notes:[{id:Date.now()+"",content,createdAt:new Date().toISOString()},...workspace.notes]});
+  const editWorkspaceNote=(id,content)=>saveWorkspace({...workspace,notes:workspace.notes.map(n=>n.id===id?{...n,content}:n)});
+  const deleteWorkspaceNote=(id)=>saveWorkspace({...workspace,notes:workspace.notes.filter(n=>n.id!==id)});
+  const addWorkspaceIdea=(content)=>saveWorkspace({...workspace,ideas:[{id:Date.now()+"",content,createdAt:new Date().toISOString()},...workspace.ideas]});
+  const deleteWorkspaceIdea=(id)=>saveWorkspace({...workspace,ideas:workspace.ideas.filter(i=>i.id!==id)});
+  const addWorkspaceSnippet=(title,content,language)=>saveWorkspace({...workspace,snippets:[{id:Date.now()+"",title,content,language:language||"javascript",createdAt:new Date().toISOString()},...workspace.snippets]});
+  const deleteWorkspaceSnippet=(id)=>saveWorkspace({...workspace,snippets:workspace.snippets.filter(s=>s.id!==id)});
+
   // Register the styled confirm dialog
   useEffect(() => {
     _confirmResolver = ({msg, resolve}) => setConfirmState({msg, resolve});
@@ -973,7 +988,7 @@ export default function QoderApp() {
     const cleanP  = window.electronAPI.onUpdateProgress?.((_,pct)=>{setUpdateStatus("downloading");setDownloadPct(pct||0);});
     const cleanR  = window.electronAPI.onUpdateReady((_,v)=>{console.log("[updater] ready",v);setUpdateStatus("ready");});
     const cleanN  = window.electronAPI.onUpdateNotAvailable?.(()=>setUpdateStatus(s=>s==="downloading"||s==="ready"?s:"current"));
-    const cleanE  = window.electronAPI.onUpdateError?.((_,msg)=>{setUpdateError(msg||"Update error");setUpdateStatus(s=>s==="ready"?s:"error");setDownloadPct(0);});
+    const cleanE  = window.electronAPI.onUpdateError?.((_,msg)=>{setUpdateError(msg||"Update error");setUpdateStatus(s=>s==="downloading"||s==="ready"?s:"error");});
     const cleanM  = window.electronAPI.onMenuCheckUpdates?.(()=>handleCheckForUpdates());
     return () => { cleanA?.(); cleanP?.(); cleanR?.(); cleanN?.(); cleanE?.(); cleanM?.(); };
   }, []);
@@ -1961,6 +1976,7 @@ export default function QoderApp() {
           </div>
           <nav style={s.nav}>
             <NavBtn active={view==="dashboard"} onClick={()=>{setView("dashboard");if(isMobile)setSidebarOpen(false);}} icon="◈" label="Dashboard"/>
+            <NavBtn active={view==="workspace"} onClick={()=>{setView("workspace");if(isMobile)setSidebarOpen(false);}} icon="✦" label="Workspace"/>
             {projects.length>0&&(()=>{
               const active=projects.filter(p=>p.status!=="archived");
               const archived=projects.filter(p=>p.status==="archived");
@@ -1973,15 +1989,32 @@ export default function QoderApp() {
                 </div>
                 {/* Grouped projects — group headings draggable for reorder, projects draggable within group */}
                 {(()=>{
-                  const dragGroupRef={current:null};
-                  const onGroupDragStart=(e,gi)=>{dragGroupRef.current=gi;e.dataTransfer.setData("groupDrag","1");e.dataTransfer.effectAllowed="move";};
-                  const onGroupDragOver=(e,gi)=>{
-                    if(dragGroupRef.current===null||dragGroupRef.current===gi||!e.dataTransfer.types.includes("groupdrag"))return;
-                    e.preventDefault();e.stopPropagation();
-                    const n=[...groups];const[m]=n.splice(dragGroupRef.current,1);n.splice(gi,0,m);
-                    dragGroupRef.current=gi;reorderGroups(n);
+                  const onGroupDragStart=(e,gi)=>{
+                    dragGroupIdxRef.current=gi;
+                    draggingGroupsRef.current=[...groups];
+                    e.dataTransfer.setData("groupDrag","1");
+                    e.dataTransfer.effectAllowed="move";
                   };
-                  const onGroupDragEnd=()=>{dragGroupRef.current=null;};
+                  const onGroupDragOver=(e,gi)=>{
+                    if(dragGroupIdxRef.current===null||dragGroupIdxRef.current===gi)return;
+                    if(!e.dataTransfer.types.includes("groupdrag"))return;
+                    e.preventDefault();e.stopPropagation();
+                    // Reorder the working copy without calling setGroups on every event
+                    const n=[...(draggingGroupsRef.current||groups)];
+                    const[m]=n.splice(dragGroupIdxRef.current,1);
+                    n.splice(gi,0,m);
+                    draggingGroupsRef.current=n;
+                    dragGroupIdxRef.current=gi;
+                    setGroups(n); // update display optimistically
+                  };
+                  const onGroupDragEnd=()=>{
+                    // Persist the final order to DB only on drop
+                    if(draggingGroupsRef.current){
+                      reorderGroups(draggingGroupsRef.current);
+                    }
+                    dragGroupIdxRef.current=null;
+                    draggingGroupsRef.current=null;
+                  };
                   return grouped.map((g,gi)=>(
                     <div key={g.id} draggable
                       onDragStart={e=>onGroupDragStart(e,gi)}
@@ -2329,6 +2362,148 @@ function DraggableSidebarList({items,onReorder,children}){
     </div>
   ))}</>;
 }
+
+// ── Workspace View (global scratch — not tied to any project) ─────────────────
+function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onAddIdea,onDeleteIdea,onAddSnippet,onDeleteSnippet,onToast,isMobile}){
+  const [tab,setTab]=useState("notes"); // notes|ideas|snippets
+  const [noteText,setNoteText]=useState("");
+  const [editingNote,setEditingNote]=useState(null);
+  const [editText,setEditText]=useState("");
+  const [ideaText,setIdeaText]=useState("");
+  const [snippetTitle,setSnippetTitle]=useState("");
+  const [snippetContent,setSnippetContent]=useState("");
+  const [snippetLang,setSnippetLang]=useState("javascript");
+  const [showSnippetForm,setShowSnippetForm]=useState(false);
+
+  const LANGS=["javascript","typescript","python","bash","sql","html","css","json","kotlin","swift","rust","go","other"];
+
+  return(
+    <div style={{...s.page,padding:isMobile?"16px 14px":"36px 40px"}}>
+      <div style={{...s.pageHead,marginBottom:24}}>
+        <div>
+          <h1 style={{...s.pageTitle,fontSize:isMobile?20:27}}>Workspace</h1>
+          <p style={s.pageSub}>Personal scratch pad — notes, ideas, and snippets not tied to any project</p>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div style={{display:"flex",gap:4,marginBottom:24,borderBottom:"1px solid var(--border)",paddingBottom:0}}>
+        {[{key:"notes",label:"📝 Notes",count:workspace.notes.length},{key:"ideas",label:"💡 Ideas",count:workspace.ideas.length},{key:"snippets",label:"💻 Snippets",count:workspace.snippets.length}].map(t=>(
+          <button key={t.key} onClick={()=>setTab(t.key)} style={{padding:"9px 18px",fontSize:13,background:"none",border:"none",borderBottom:tab===t.key?"2px solid var(--accent)":"2px solid transparent",color:tab===t.key?"var(--accent-text)":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",fontWeight:tab===t.key?700:600,transition:"all .15s",marginBottom:-1}}>
+            {t.label}{t.count>0&&<span style={{...s.tabPill,marginLeft:6}}>{t.count}</span>}
+          </button>
+        ))}
+      </div>
+
+      {/* Notes */}
+      {tab==="notes"&&(
+        <div>
+          {/* Composer */}
+          <div style={{background:"var(--bg-card)",border:"1px solid var(--border-md)",borderRadius:10,padding:14,marginBottom:20}}>
+            <QTextarea className="q-input" style={{minHeight:80,resize:"vertical",marginBottom:8}} value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="Jot something down…" onKeyDown={e=>{if(e.key==="Enter"&&e.ctrlKey&&noteText.trim()){onAddNote(noteText.trim());setNoteText("");}}}/>
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+              <span style={{...s.mono10,color:"var(--txt-faint)",alignSelf:"center"}}>Ctrl+Enter to save</span>
+              <button className="q-btn-primary" style={{padding:"7px 20px"}} onClick={()=>{if(noteText.trim()){onAddNote(noteText.trim());setNoteText("");}}} disabled={!noteText.trim()}>Add Note</button>
+            </div>
+          </div>
+          {workspace.notes.length===0&&<div style={s.empty}><p>No notes yet. Write anything — thoughts, references, reminders.</p></div>}
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {workspace.notes.map(n=>(
+              <div key={n.id} style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderLeft:"3px solid var(--accent)",borderRadius:10,padding:14}}>
+                {editingNote===n.id?(
+                  <>
+                    <QTextarea className="q-input" style={{minHeight:70,resize:"vertical",marginBottom:8}} value={editText} onChange={e=>setEditText(e.target.value)} autoFocus/>
+                    <div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+                      <button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12}} onClick={()=>setEditingNote(null)}>Cancel</button>
+                      <button className="q-btn-primary" style={{padding:"5px 14px",fontSize:12}} onClick={()=>{onEditNote(n.id,editText.trim());setEditingNote(null);}}>Save</button>
+                    </div>
+                  </>
+                ):(
+                  <>
+                    <div style={{lineHeight:1.75,whiteSpace:"pre-wrap",color:"var(--txt-sub)",fontSize:14,marginBottom:10}}>{n.content}</div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{...s.mono10,color:"var(--txt-dim)"}}>{new Date(n.createdAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>
+                      <div style={{display:"flex",gap:4}}>
+                        <button className="q-btn-ghost" style={{padding:"3px 9px",fontSize:11}} onClick={()=>{setEditingNote(n.id);setEditText(n.content);}}>Edit</button>
+                        <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this note?"))onDeleteNote(n.id);}}>✕</button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Ideas */}
+      {tab==="ideas"&&(
+        <div>
+          <div style={{background:"var(--bg-card)",border:"1px solid var(--border-md)",borderRadius:10,padding:14,marginBottom:20}}>
+            <QTextarea className="q-input" style={{minHeight:70,resize:"vertical",marginBottom:8}} value={ideaText} onChange={e=>setIdeaText(e.target.value)} placeholder="Capture an idea — app concept, feature, or anything worth remembering…" onKeyDown={e=>{if(e.key==="Enter"&&e.ctrlKey&&ideaText.trim()){onAddIdea(ideaText.trim());setIdeaText("");}}}/>
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+              <span style={{...s.mono10,color:"var(--txt-faint)",alignSelf:"center"}}>Ctrl+Enter to save</span>
+              <button className="q-btn-primary" style={{padding:"7px 20px"}} onClick={()=>{if(ideaText.trim()){onAddIdea(ideaText.trim());setIdeaText("");}}} disabled={!ideaText.trim()}>Capture Idea</button>
+            </div>
+          </div>
+          {workspace.ideas.length===0&&<div style={s.empty}><p>No ideas yet. This is your free-form idea dump — no project required.</p></div>}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
+            {workspace.ideas.map(idea=>(
+              <div key={idea.id} style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderLeft:"3px solid #B47FFF",borderRadius:10,padding:14,position:"relative"}}>
+                <button className="q-del" style={{position:"absolute",top:8,right:8}} onClick={async()=>{if(await qConfirm("Delete this idea?"))onDeleteIdea(idea.id);}}>✕</button>
+                <p style={{color:"var(--txt-sub)",fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap",paddingRight:20}}>{idea.content}</p>
+                <div style={{...s.mono10,color:"var(--txt-dim)",marginTop:8}}>{new Date(idea.createdAt).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Snippets */}
+      {tab==="snippets"&&(
+        <div>
+          {!showSnippetForm?(
+            <button className="q-btn-primary" style={{marginBottom:20}} onClick={()=>setShowSnippetForm(true)}>+ Add Snippet</button>
+          ):(
+            <div style={{background:"var(--bg-card)",border:"1px solid var(--border-md)",borderRadius:10,padding:16,marginBottom:20}}>
+              <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+                <QInput className="q-input" style={{flex:1,minWidth:200,marginTop:0}} value={snippetTitle} onChange={e=>setSnippetTitle(e.target.value)} placeholder="Snippet title…"/>
+                <select className="q-input" style={{width:140,marginTop:0}} value={snippetLang} onChange={e=>setSnippetLang(e.target.value)}>
+                  {LANGS.map(l=><option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+              <QTextarea className="q-input" style={{minHeight:120,resize:"vertical",fontFamily:"'JetBrains Mono'",fontSize:12,marginBottom:10}} value={snippetContent} onChange={e=>setSnippetContent(e.target.value)} placeholder="Paste your code here…"/>
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                <button className="q-btn-ghost" style={{padding:"7px 14px",fontSize:12}} onClick={()=>{setShowSnippetForm(false);setSnippetTitle("");setSnippetContent("");}}>Cancel</button>
+                <button className="q-btn-primary" style={{padding:"7px 18px"}} onClick={()=>{if(snippetContent.trim()){onAddSnippet(snippetTitle.trim()||"Untitled",snippetContent.trim(),snippetLang);setSnippetTitle("");setSnippetContent("");setShowSnippetForm(false);}}} disabled={!snippetContent.trim()}>Save Snippet</button>
+              </div>
+            </div>
+          )}
+          {workspace.snippets.length===0&&<div style={s.empty}><p>No snippets yet. Save reusable code, commands, or templates here.</p></div>}
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {workspace.snippets.map(sn=>(
+              <div key={sn.id} style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                  <div>
+                    <span style={{fontFamily:"'Syne'",fontWeight:700,fontSize:15,color:"var(--txt)"}}>{sn.title}</span>
+                    <span style={{marginLeft:10,fontFamily:"'JetBrains Mono'",fontSize:10,color:"var(--accent-text)",padding:"1px 6px",borderRadius:4,background:"var(--accent-dim)"}}>{sn.language}</span>
+                  </div>
+                  <div style={{display:"flex",gap:4}}>
+                    <button className="q-btn-ghost" style={{padding:"3px 9px",fontSize:11}} onClick={()=>navigator.clipboard.writeText(sn.content).then(()=>onToast&&onToast("Copied","ok"))}>Copy</button>
+                    <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this snippet?"))onDeleteSnippet(sn.id);}}>✕</button>
+                  </div>
+                </div>
+                <pre style={{fontFamily:"'JetBrains Mono'",fontSize:12,color:"var(--txt-sub)",whiteSpace:"pre-wrap",wordBreak:"break-all",background:"var(--bg)",padding:12,borderRadius:8,maxHeight:200,overflow:"auto",margin:0}}>{sn.content}</pre>
+                <div style={{...s.mono10,color:"var(--txt-dim)",marginTop:8}}>{new Date(sn.createdAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function Dashboard({projects,allProjects,isMobile,search,setSearch,filter,setFilter,userTags,tagFilter,setTagFilter,onOpen,onNew,onExportAll,onCmdPalette,onWeeklySummary}){
@@ -2726,7 +2901,7 @@ function OverviewTab({project,latestVer,allProjectsList}){
       {items.length===0?<div style={s.empty}><p>No activity for this period.</p></div>:(
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
           {items.map(item=>{const meta=FEED_META[item.type]||FEED_META.note;return(
-            <div key={`${item.type}-${item.id}`} style={{display:"flex",gap:12,padding:"12px 14px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,alignItems:"flex-start"}}>
+            <div key={`${item.type}-${item.id}`} className="q-card" style={{display:"flex",gap:12,padding:"12px 14px",background:"var(--bg-card)",border:"1px solid var(--border)",borderRadius:10,alignItems:"flex-start"}}>
               <div style={{width:28,height:28,borderRadius:6,background:`${meta.color}14`,border:`1px solid ${meta.color}28`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0,marginTop:1}}>{meta.icon}</div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
@@ -4868,7 +5043,7 @@ const css=`
   .q-input{width:100%;background:var(--bg-input);border:1px solid var(--border-md);border-radius:8px;padding:10px 13px;color:var(--txt);font-size:14px;font-family:'Syne',sans-serif;transition:border-color .15s;margin-top:6px;}.q-input:focus{border-color:var(--accent);}
   .q-mono{font-family:'JetBrains Mono',monospace!important;}
   .q-chip{padding:5px 11px;background:var(--bg-card);border:1px solid var(--border-md);border-radius:20px;color:var(--txt-muted);font-size:12px;font-family:'Syne',sans-serif;transition:all .15s;}.q-chip:hover{border-color:var(--accent-border);color:var(--txt);}.q-chip-on{background:var(--accent-dim)!important;border-color:var(--accent)!important;color:var(--accent-text)!important;}
-  .q-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px;cursor:pointer;transition:border-color .2s,background .2s;}.q-card:hover{border-color:var(--accent-border);background:var(--bg-hover,var(--bg-input));}
+  .q-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px;cursor:pointer;transition:border-color .18s,background .18s;}.q-card:hover{border-color:var(--accent-border);background:var(--bg-card-hover);}
   .q-ver-card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:18px 20px;transition:border-color .2s;}.q-ver-card:hover{border-color:var(--accent-border);}
   .q-ms-row{display:flex;align-items:flex-start;gap:12px;padding:10px 8px;border-radius:8px;transition:background .15s;}.q-ms-row:hover{background:rgba(0,0,0,.04);}
   .q-check{width:22px;height:22px;min-width:22px;border:2px solid #2A3050;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#4ADE80;margin-top:1px;transition:all .15s;flex-shrink:0;}.q-check:hover{border-color:#4ADE80;}.q-check-done{background:rgba(74,222,128,.1);border-color:#4ADE80;}
