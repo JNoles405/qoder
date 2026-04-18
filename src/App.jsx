@@ -54,7 +54,7 @@ function usePullToRefresh(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.8.9";
+const APP_VER    = "v0.9.0";
 const POLL_MS    = 10000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -1642,6 +1642,13 @@ export default function QoderApp() {
   };
 
   // ── Project Groups ────────────────────────────────────────────────────────────
+  const updateGroup=async(gid,name,color)=>{
+    try{
+      await sb.patch(cfg.url,cfg.key,T(),"project_groups",gid,{name,color:color||null});
+      setGroups(gs=>gs.map(g=>g.id===gid?{...g,name,color:color||null}:g));
+      showToast("Group updated");
+    }catch(e){showToast(e.message,"err");}
+  };
   const addGroup=async(name,color)=>{
     const position=groups.length;
     try{const row=await sb.post(cfg.url,cfg.key,T(),"project_groups",{user_id:session.user.id,name,color:color||null,position});
@@ -1874,7 +1881,7 @@ export default function QoderApp() {
   const liveProj=selProj?(projects.find(p=>p.id===selProj.id)||selProj):null;
 
   return(
-    <div style={s.root}>
+    <div style={{...s.root,paddingTop:(updateStatus==="available"||updateStatus==="downloading"||updateStatus==="ready")?44:0,transition:"padding-top .2s",boxSizing:"border-box"}}>
       <style>{css}</style>
       <style>{buildThemeCSS(theme,accentColor)}</style>
       {toast&&<Toast {...toast}/>}
@@ -1886,7 +1893,7 @@ export default function QoderApp() {
 
       {/* Update banner — unified with progress bar */}
       {(updateStatus==="available"||updateStatus==="downloading"||updateStatus==="ready")&&(
-        <div style={{position:"fixed",top:window.electronAPI?32:0,left:0,right:window.electronAPI?140:0,zIndex:5000,background:updateStatus==="ready"?"var(--update-ok-bg)":"var(--update-info-bg)",borderBottom:`1px solid ${updateStatus==="ready"?"#4ADE80":"var(--accent)"}`,padding:"0",display:"flex",flexDirection:"column",borderRadius:window.electronAPI?"0 0 0 8px":0}}>
+        <div style={{position:"fixed",top:0,left:0,right:0,zIndex:9999,background:updateStatus==="ready"?"rgba(6,20,15,.97)":"rgba(8,14,30,.97)",borderBottom:`1px solid ${updateStatus==="ready"?"#4ADE80":"var(--accent)"}`,padding:"0",display:"flex",flexDirection:"column"}}>
           {/* Progress bar — animates while downloading */}
           {(updateStatus==="available"||updateStatus==="downloading")&&(
             <div style={{height:3,background:"var(--border)",width:"100%"}}>
@@ -1966,20 +1973,34 @@ export default function QoderApp() {
                 </div>
                 {/* Grouped projects — group headings draggable for reorder, projects draggable within group */}
                 {(()=>{
+                  const dragGroupRef={current:null};
+                  const onGroupDragStart=(e,gi)=>{dragGroupRef.current=gi;e.dataTransfer.setData("groupDrag","1");e.dataTransfer.effectAllowed="move";};
+                  const onGroupDragOver=(e,gi)=>{
+                    if(dragGroupRef.current===null||dragGroupRef.current===gi||!e.dataTransfer.types.includes("groupdrag"))return;
+                    e.preventDefault();e.stopPropagation();
+                    const n=[...groups];const[m]=n.splice(dragGroupRef.current,1);n.splice(gi,0,m);
+                    dragGroupRef.current=gi;reorderGroups(n);
+                  };
+                  const onGroupDragEnd=()=>{dragGroupRef.current=null;};
                   return grouped.map((g,gi)=>(
-                    <div key={g.id}
+                    <div key={g.id} draggable
+                      onDragStart={e=>onGroupDragStart(e,gi)}
+                      onDragOver={e=>onGroupDragOver(e,gi)}
+                      onDragEnd={onGroupDragEnd}
                       style={{marginTop:gi>0?6:0,paddingTop:gi>0?6:0,borderTop:gi>0?"1px solid var(--border-lg)":"none"}}>
-                      {/* Group heading — drop zone for assigning projects to this group */}
+                      {/* Group heading — drag handle + drop zone for project assignment */}
                       <div
-                        onDragOver={e=>{e.preventDefault();e.currentTarget.style.background="var(--accent-dim)";e.currentTarget.style.outline="1px dashed var(--accent)";}}
+                        onDragOver={e=>{if(!e.dataTransfer.types.includes("groupdrag")){e.preventDefault();e.currentTarget.style.background="var(--accent-dim)";e.currentTarget.style.outline="1px dashed var(--accent)";}}}
                         onDragLeave={e=>{e.currentTarget.style.background="";e.currentTarget.style.outline="";}}
                         onDrop={e=>{e.currentTarget.style.background="";e.currentTarget.style.outline="";const pid=e.dataTransfer.getData("projectId");if(pid){e.preventDefault();e.stopPropagation();assignProjectToGroup(pid,g.id);}}}
-                        title="Drop a project here to add it to this group"
-                        style={{display:"flex",alignItems:"center",padding:"4px 12px 4px 10px",gap:6,
-                          borderLeft:g.color?`2px solid ${g.color}40`:"2px solid transparent",
-                          marginLeft:6,borderRadius:"0 4px 4px 0",transition:"background .1s",cursor:"copy"}}>
-                        {g.color&&<span style={{width:6,height:6,borderRadius:"50%",background:g.color,flexShrink:0}}/>}
-                        <span style={{fontSize:10,fontWeight:700,letterSpacing:"1.2px",color:g.color||"var(--txt-faint)",textTransform:"uppercase",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",opacity:g.color?0.85:1}}>{g.name}</span>
+                        title="Drag to reorder group · Drop a project here to assign it"
+                        style={{display:"flex",alignItems:"center",padding:"4px 12px 4px 6px",gap:6,
+                          borderLeft:g.color?`2px solid ${g.color}60`:"2px solid var(--border)",
+                          marginLeft:4,borderRadius:"0 4px 4px 0",transition:"background .1s",cursor:"grab"}}>
+                        <span style={{color:"var(--txt-dim)",fontSize:10,userSelect:"none",flexShrink:0}}>⠿</span>
+                        {g.color&&<span style={{width:7,height:7,borderRadius:"50%",background:g.color,flexShrink:0}}/>}
+                        <span style={{fontSize:10,fontWeight:700,letterSpacing:"1.2px",color:g.color||"var(--txt-faint)",textTransform:"uppercase",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",opacity:g.color?0.9:1}}>{g.name}</span>
+                        <button onClick={e=>{e.stopPropagation();openModal("edit-group",{...g});}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:11,padding:"0 3px",lineHeight:1}} title="Edit group">✎</button>
                         <button onClick={async e=>{e.stopPropagation();if(await qConfirm(`Delete group "${g.name}"? Projects will be ungrouped.`))deleteGroup(g.id);}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--txt-dim)",fontSize:11,padding:"0 2px",lineHeight:1}} className="q-group-del">✕</button>
                       </div>
                       {/* Projects within group — use DraggableSidebarList for reordering */}
@@ -2181,6 +2202,7 @@ export default function QoderApp() {
         {modal==="fix-issue"    &&<FixIssueModal data={form} setData={setForm} onSubmit={d=>{fixIssue(selProj.id,d.id,d.fixDescription,d.fixedInVersionId);closeModal();}}                  onCancel={closeModal}/>}
         {modal==="shortcuts"    &&<ShortcutsModal onCancel={closeModal}/>}
         {modal==="add-group"    &&<GroupForm     data={form} setData={setForm} onSubmit={d=>{addGroup(d.name,d.color);closeModal();}} onCancel={closeModal}/>}
+        {modal==="edit-group"   &&<GroupForm     data={form} setData={setForm} title="Edit Group" onSubmit={d=>{updateGroup(d.id,d.name,d.color);closeModal();}} onCancel={closeModal}/>}
         {modal==="add-sprint"   &&<SprintForm    data={form} setData={setForm} onSubmit={d=>{addSprint(selProj.id,d);closeModal();}}                             onCancel={closeModal}/>}
         {modal==="add-build"    &&<BuildLogForm  data={form} setData={setForm} versions={selProj?.versions||[]} onSubmit={d=>{addBuildLog(selProj.id,d);closeModal();}}         onCancel={closeModal}/>}
         {modal==="edit-build"   &&<BuildLogForm  data={form} setData={setForm} versions={selProj?.versions||[]} title="Edit Build" onSubmit={d=>{updateBuildLog(selProj.id,d.id,d);closeModal();}} onCancel={closeModal}/>}
@@ -3432,7 +3454,7 @@ function TimeTab({project,onStart,onStop,onDelete,pomMode,setPomMode,pomSecs,set
 }
 
 // ── Group Form ───────────────────────────────────────────────────────────────
-function GroupForm({data,setData,onSubmit,onCancel}){
+function GroupForm({data,setData,onSubmit,onCancel,title="New Group"}){
   const set=(k,v)=>setData(d=>({...d,[k]:v}));
   const GROUP_COLORS=["#00D4FF","#4ADE80","#FFB347","#FF6B9D","#B47FFF","#FF4466","#6EB8D0","#F97316"];
   return(
@@ -4846,7 +4868,7 @@ const css=`
   .q-input{width:100%;background:var(--bg-input);border:1px solid var(--border-md);border-radius:8px;padding:10px 13px;color:var(--txt);font-size:14px;font-family:'Syne',sans-serif;transition:border-color .15s;margin-top:6px;}.q-input:focus{border-color:var(--accent);}
   .q-mono{font-family:'JetBrains Mono',monospace!important;}
   .q-chip{padding:5px 11px;background:var(--bg-card);border:1px solid var(--border-md);border-radius:20px;color:var(--txt-muted);font-size:12px;font-family:'Syne',sans-serif;transition:all .15s;}.q-chip:hover{border-color:var(--accent-border);color:var(--txt);}.q-chip-on{background:var(--accent-dim)!important;border-color:var(--accent)!important;color:var(--accent-text)!important;}
-  .q-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px;cursor:pointer;transition:all .2s;}.q-card:hover{border-color:var(--accent-border);transform:translateY(-2px);background:var(--bg-card);}
+  .q-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px;cursor:pointer;transition:border-color .2s,background .2s;}.q-card:hover{border-color:var(--accent-border);background:var(--bg-hover,var(--bg-input));}
   .q-ver-card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:18px 20px;transition:border-color .2s;}.q-ver-card:hover{border-color:var(--accent-border);}
   .q-ms-row{display:flex;align-items:flex-start;gap:12px;padding:10px 8px;border-radius:8px;transition:background .15s;}.q-ms-row:hover{background:rgba(0,0,0,.04);}
   .q-check{width:22px;height:22px;min-width:22px;border:2px solid #2A3050;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#4ADE80;margin-top:1px;transition:all .15s;flex-shrink:0;}.q-check:hover{border-color:#4ADE80;}.q-check-done{background:rgba(74,222,128,.1);border-color:#4ADE80;}
