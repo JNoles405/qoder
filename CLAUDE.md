@@ -23,6 +23,11 @@ If you legitimately need to remove one of these deps, also remove its `require(.
 
 When adding a dependency, ask: does `main.js` or `preload.js` use it? If yes → `dependencies`. If only `src/**` uses it → either works, but prefer `dependencies` for anything that ends up in the final bundle.
 
+## NSIS installer customization
+
+- `build/installer.nsh` is referenced by `package.json` `build.nsis.include`. It force-kills any orphaned `Qoder.exe` processes (GPU, renderer, crashpad helper, etc.) before install/uninstall so upgrades don't fail with "can't close Qoder".
+- Do NOT delete `build/installer.nsh` or remove the `"include"` line from `nsis` config.
+
 ## Auto-updater
 
 - Publish target: GitHub releases on `JNoles405/qoder` (configured in `package.json` `build.publish`).
