@@ -1,6 +1,6 @@
 {
   "name": "qoder",
-  "version": "0.9.16",
+  "version": "0.9.17",
   "description": "Track every build \u2014 version history, milestones, release links",
   "main": "main.js",
   "homepage": "https://qoder.dev",

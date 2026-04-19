@@ -82,7 +82,7 @@ function _usePullToRefreshDisabled(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.16";
+const APP_VER    = "v0.9.17";
 const POLL_MS    = 3000;
 const STORAGE_BUCKET = "qoder-files";
 
@@ -1372,8 +1372,8 @@ export default function QoderApp() {
   const addProjectAndReturn=async(p)=>{
     const position=projects.length;
     try{
-      const row=await sb.post(cfg.url,cfg.key,T(),"projects",{user_id:session.user.id,name:p.name,description:p.description||null,status:p.status||"planning",tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,color:p.color||null,position,is_public:false});
-      const proj={id:row.id,name:row.name,description:row.description,status:row.status,techStack:row.tech_stack||[],localFolder:row.local_folder||null,gitUrl:row.git_url||"",supabaseUrl:row.supabase_url||"",vercelUrl:row.vercel_url||"",isPublic:false,publicSlug:null,color:row.color||null,position:row.position,createdAt:row.created_at,versions:[],milestones:[],notes:[],todos:[],assets:[],issues:[],ideas:[],concepts:[],buildLogs:[],environments:[],dependencies:[],tagIds:[],sprints:[],timeSessions:[],snippets:[],dailyLogs:[]};
+      const row=await sb.post(cfg.url,cfg.key,T(),"projects",{user_id:session.user.id,name:p.name,description:p.description||null,status:p.status||"planning",tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,color:p.color||null,group_id:p.groupId||null,position,is_public:false});
+      const proj={id:row.id,name:row.name,description:row.description,status:row.status,techStack:row.tech_stack||[],localFolder:row.local_folder||null,gitUrl:row.git_url||"",supabaseUrl:row.supabase_url||"",vercelUrl:row.vercel_url||"",isPublic:false,publicSlug:null,color:row.color||null,groupId:row.group_id||null,position:row.position,createdAt:row.created_at,versions:[],milestones:[],notes:[],todos:[],assets:[],issues:[],ideas:[],concepts:[],buildLogs:[],environments:[],dependencies:[],tagIds:[],sprints:[],timeSessions:[],snippets:[],dailyLogs:[]};
       setProjects(ps=>[...ps,proj]);
       showToast("Project created");
       // If created from template, apply template data
@@ -1392,7 +1392,7 @@ export default function QoderApp() {
     }catch(e){showToast(e.message,"err");return null;}
   };
   const updateProject=async(id,p)=>{
-    try{await sb.patch(cfg.url,cfg.key,T(),"projects",id,{name:p.name,description:p.description||null,status:p.status,tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,color:p.color||null,group_id:p.groupId||null,depends_on:p.dependsOn||[]});mutate(id,x=>({...x,...p}));showToast("Project updated");}
+    try{const color=p.color&&p.color.trim()?p.color:null;await sb.patch(cfg.url,cfg.key,T(),"projects",id,{name:p.name,description:p.description||null,status:p.status,tech_stack:p.techStack||[],local_folder:p.localFolder||null,git_url:p.gitUrl||null,supabase_url:p.supabaseUrl||null,vercel_url:p.vercelUrl||null,color,group_id:p.groupId||null,depends_on:p.dependsOn||[]});mutate(id,x=>({...x,name:p.name,description:p.description||null,status:p.status,techStack:p.techStack||[],localFolder:p.localFolder||null,gitUrl:p.gitUrl||"",supabaseUrl:p.supabaseUrl||"",vercelUrl:p.vercelUrl||"",color,groupId:p.groupId||null,dependsOn:p.dependsOn||[]}));showToast("Project updated");}
     catch(e){showToast(e.message,"err");}
   };
   const deleteProject=async(id)=>{
