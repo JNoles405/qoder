@@ -82,7 +82,7 @@ function _usePullToRefreshDisabled(onRefresh){
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CFG_KEY    = "qoder-cfg-v2";
-const APP_VER    = "v0.9.18";
+const APP_VER    = "v0.9.19";
 const POLL_MS    = 3000;
 const STORAGE_BUCKET = "qoder-files";
 // Sentinel URL for local-only mode. When cfg.url === LOCAL_URL, every sb.*
