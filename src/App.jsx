@@ -85,6 +85,12 @@ const CFG_KEY    = "qoder-cfg-v2";
 const APP_VER    = "v0.9.17";
 const POLL_MS    = 3000;
 const STORAGE_BUCKET = "qoder-files";
+// Sentinel URL for local-only mode. When cfg.url === LOCAL_URL, every sb.*
+// method dispatches to localDb (localStorage-backed) instead of fetching
+// Supabase. Lets ~130 existing sb.* call sites work unchanged in both modes.
+const LOCAL_URL  = "local://qoder";
+const LOCAL_TABLE_PREFIX = "qoder-local-table:";
+const LOCAL_USER_ID = "local-user";
 
 const STATUS_CONFIG = {
   planning: {label:"Planning",       color:"var(--txt-muted)",bg:"rgba(139,143,168,0.12)"},
@@ -336,22 +342,372 @@ function PinIcon({size=13,active=false}){
 }
 function FolderIcon({size=13}){return(<svg width={size} height={size} viewBox="0 0 20 16" fill="none" style={{color:"var(--accent-text)"}}><path d="M1 2.5C1 1.67 1.67 1 2.5 1H7.5L9.5 3.5H17.5C18.33 3.5 19 4.17 19 5V13.5C19 14.33 18.33 15 17.5 15H2.5C1.67 15 1 14.33 1 13.5V2.5Z" fill="currentColor" fillOpacity="0.18" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/></svg>);}
 
+// ── IndexedDB wrapper for local data layer ────────────────────────────────────
+// Thin promise-based wrapper around the raw IndexedDB API. One object store
+// ("tables"), keyed by qoder-local-table:<name>, value is the rows array.
+// We keep one row-per-table to mirror the localStorage layout — local-mode
+// reads/writes whole tables, so per-record indexes wouldn't help. Trading
+// granularity for the much higher size budget IDB provides.
+const IDB_NAME="qoder-local";
+const IDB_STORE="tables";
+const idb={
+  _db:null,
+  _opening:null,
+  _supported:typeof indexedDB!=="undefined",
+  async _open(){
+    if(this._db)return this._db;
+    if(this._opening)return this._opening;
+    this._opening=new Promise((resolve,reject)=>{
+      try{
+        const req=indexedDB.open(IDB_NAME,1);
+        req.onupgradeneeded=()=>{
+          const db=req.result;
+          if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE);
+        };
+        req.onsuccess=()=>{this._db=req.result;resolve(this._db);};
+        req.onerror=()=>reject(req.error||new Error("IDB open failed"));
+      }catch(e){reject(e);}
+    });
+    return this._opening;
+  },
+  async get(key){
+    if(!this._supported)return undefined;
+    try{
+      const db=await this._open();
+      return await new Promise((resolve)=>{
+        const tx=db.transaction(IDB_STORE,"readonly");
+        const r=tx.objectStore(IDB_STORE).get(key);
+        r.onsuccess=()=>resolve(r.result);
+        r.onerror=()=>resolve(undefined);
+      });
+    }catch{return undefined;}
+  },
+  async put(key,value){
+    if(!this._supported)throw new Error("IndexedDB not available");
+    const db=await this._open();
+    return await new Promise((resolve,reject)=>{
+      const tx=db.transaction(IDB_STORE,"readwrite");
+      const r=tx.objectStore(IDB_STORE).put(value,key);
+      r.onsuccess=()=>resolve();
+      r.onerror=()=>reject(r.error||new Error("IDB put failed"));
+    });
+  },
+  async delete(key){
+    if(!this._supported)return;
+    try{
+      const db=await this._open();
+      await new Promise((resolve)=>{
+        const tx=db.transaction(IDB_STORE,"readwrite");
+        const r=tx.objectStore(IDB_STORE).delete(key);
+        r.onsuccess=()=>resolve();
+        r.onerror=()=>resolve();
+      });
+    }catch{}
+  },
+  async keys(){
+    if(!this._supported)return [];
+    try{
+      const db=await this._open();
+      return await new Promise((resolve)=>{
+        const tx=db.transaction(IDB_STORE,"readonly");
+        const r=tx.objectStore(IDB_STORE).getAllKeys();
+        r.onsuccess=()=>resolve(r.result||[]);
+        r.onerror=()=>resolve([]);
+      });
+    }catch{return [];}
+  },
+};
+
+// One-time migration of legacy localStorage tables into IDB. Runs at boot;
+// safe to call repeatedly — it no-ops if IDB already has any qoder-local-table
+// entries, and it only walks localStorage once.
+let _localToIdbMigrated=false;
+async function migrateLocalStorageToIdb(){
+  if(_localToIdbMigrated)return;
+  _localToIdbMigrated=true;
+  if(!idb._supported)return;
+  // If IDB has any of our keys, skip — assume migration already happened.
+  const existing=await idb.keys();
+  if(existing.some(k=>typeof k==="string"&&k.startsWith(LOCAL_TABLE_PREFIX)))return;
+  const legacy=[];
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.startsWith(LOCAL_TABLE_PREFIX))legacy.push(k);
+    }
+  }catch{return;}
+  for(const k of legacy){
+    try{
+      const arr=JSON.parse(localStorage.getItem(k)||"[]");
+      await idb.put(k,arr);
+      localStorage.removeItem(k);
+    }catch{}
+  }
+}
+
+// ── Local data layer (Phase 2: local-only mode) ───────────────────────────────
+// Mirrors the subset of Supabase REST behavior the app actually uses:
+//   - Filters: ?field=eq.value, ?field=in.(a,b,c)
+//   - Sorting: &order=field.asc|desc
+//   - POST returns inserted row (with synthetic id + created_at)
+//   - PATCH ?id=eq.X merges fields and returns the updated row
+//   - DELETE ?id=eq.X removes the row
+// Storage: localStorage, one JSON array per table keyed by LOCAL_TABLE_PREFIX.
+// Auth: signIn/signUp/refresh return a synthetic session; no server roundtrip.
+// Files: uploadFile returns a base64 data: URL (works in <img src>, persists).
+const localDb = {
+  // Backed by IndexedDB (large budget) with a fallback to localStorage.
+  // The fallback handles two cases:
+  //  1. Legacy data: a user upgraded from a localStorage-only build and the
+  //     migrateLocalStorageToIdb sweep hasn't completed yet at the moment we
+  //     read (race against the boot effect).
+  //  2. Environments where IDB is unavailable (private browsing on some
+  //     browsers, very old runtimes) — the app continues to work, just at
+  //     the smaller localStorage cap.
+  // Writes always target IDB, then remove the legacy localStorage copy if
+  // present, so we converge on a single backend over time.
+  async _read(table){
+    const key=LOCAL_TABLE_PREFIX+table;
+    try{
+      const arr=await idb.get(key);
+      if(Array.isArray(arr))return arr;
+    }catch{}
+    try{
+      const v=localStorage.getItem(key);
+      if(v){const arr=JSON.parse(v);if(Array.isArray(arr))return arr;}
+    }catch{}
+    return [];
+  },
+  async _write(table,rows){
+    const key=LOCAL_TABLE_PREFIX+table;
+    try{
+      await idb.put(key,rows);
+      try{localStorage.removeItem(key);}catch{}
+      return;
+    }catch{}
+    // IDB unavailable — fall through to localStorage. Surface a recognizable
+    // error if even that fails (typically QuotaExceededError on the smaller cap).
+    try{ localStorage.setItem(key,JSON.stringify(rows)); }catch(e){
+      throw new Error("Local storage full. Free up space or connect Supabase to sync.");
+    }
+  },
+  _uuid(){
+    if(typeof crypto!=="undefined"&&crypto.randomUUID)return crypto.randomUUID();
+    return "loc-"+Math.random().toString(36).slice(2)+Date.now().toString(36);
+  },
+  // Parse a query string like "?user_id=eq.X&project_id=in.(a,b)&order=name.asc"
+  // into {filters:[{field,op,value}], order:{field,dir}}.
+  _parseQuery(q){
+    const out={filters:[],order:null};
+    if(!q)return out;
+    const s=q.replace(/^\?/,"");
+    if(!s)return out;
+    for(const part of s.split("&")){
+      const eq=part.indexOf("=");
+      if(eq<0)continue;
+      const k=decodeURIComponent(part.slice(0,eq));
+      const v=decodeURIComponent(part.slice(eq+1));
+      if(k==="order"){
+        const [f,d]=v.split(".");
+        out.order={field:f,dir:(d||"asc").toLowerCase()};
+      }else if(v.startsWith("eq.")){
+        out.filters.push({field:k,op:"eq",value:v.slice(3)});
+      }else if(v.startsWith("in.")){
+        const list=v.slice(3).replace(/^\(|\)$/g,"").split(",").filter(Boolean);
+        out.filters.push({field:k,op:"in",values:list});
+      }
+      // Other operators (gt/lt/like/etc.) intentionally not supported — the
+      // app currently only emits eq/in/order. Add here if a new pattern is used.
+    }
+    return out;
+  },
+  _match(row,filters){
+    for(const f of filters){
+      const cell=row[f.field];
+      if(f.op==="eq"){
+        // Compare loosely so numeric ids written as strings still match
+        if(String(cell)!==String(f.value))return false;
+      }else if(f.op==="in"){
+        if(!f.values.map(String).includes(String(cell)))return false;
+      }
+    }
+    return true;
+  },
+  _sort(rows,order){
+    if(!order)return rows;
+    const dir=order.dir==="desc"?-1:1;
+    return [...rows].sort((a,b)=>{
+      const av=a[order.field],bv=b[order.field];
+      if(av==null&&bv==null)return 0;
+      if(av==null)return 1;
+      if(bv==null)return -1;
+      if(av<bv)return -1*dir;
+      if(av>bv)return 1*dir;
+      return 0;
+    });
+  },
+  async get(table,q){
+    const {filters,order}=this._parseQuery(q);
+    const rows=(await this._read(table)).filter(r=>this._match(r,filters));
+    return this._sort(rows,order);
+  },
+  async post(table,body){
+    const rows=await this._read(table);
+    const now=new Date().toISOString();
+    // Body may be a single object or array; Supabase POST allows either.
+    const items=Array.isArray(body)?body:[body];
+    const inserted=items.map(b=>({id:b.id||this._uuid(),created_at:b.created_at||now,...b}));
+    rows.push(...inserted);
+    await this._write(table,rows);
+    return Array.isArray(body)?inserted:inserted[0];
+  },
+  async patch(table,id,body){
+    const rows=await this._read(table);
+    const idx=rows.findIndex(r=>String(r.id)===String(id));
+    if(idx<0)return null;
+    rows[idx]={...rows[idx],...body};
+    await this._write(table,rows);
+    return rows[idx];
+  },
+  async del(table,id){
+    const rows=(await this._read(table)).filter(r=>String(r.id)!==String(id));
+    await this._write(table,rows);
+  },
+  async upsertSettings(userId,settings){
+    const rows=await this._read("user_settings");
+    const idx=rows.findIndex(r=>String(r.user_id)===String(userId));
+    if(idx<0){
+      const ins={id:this._uuid(),user_id:userId,...settings,created_at:new Date().toISOString()};
+      rows.push(ins);
+      await this._write("user_settings",rows);
+      return [ins];
+    }
+    rows[idx]={...rows[idx],...settings};
+    await this._write("user_settings",rows);
+    return [rows[idx]];
+  },
+  async uploadFile(file){
+    // Encode as base64 data: URL so it survives reloads via the table value.
+    return await new Promise((resolve,reject)=>{
+      const fr=new FileReader();
+      fr.onload=()=>resolve(String(fr.result));
+      fr.onerror=()=>reject(new Error("Failed to read file"));
+      fr.readAsDataURL(file);
+    });
+  },
+  // Synthetic auth — no server. Returns a session shape compatible with sb.*.
+  _session(){
+    return{
+      access_token:"local",
+      refresh_token:"local",
+      user:{id:LOCAL_USER_ID,email:"local@qoder.app"},
+    };
+  },
+};
+
+// Phase 3.5: detect/clear leftover local-mode tables.
+// After a successful local→cloud sync, the local data still sits in localStorage
+// as a safety net. These helpers power the "Local backup" banner that lets the
+// user clear it once they're confident the cloud copy is good.
+const LOCAL_BACKUP_DISMISSED_KEY="qoder-local-backup-dismissed";
+async function getLocalBackupCount(){
+  // Returns the total number of records sitting in qoder-local-table:* keys
+  // across IDB (current backend) AND localStorage (legacy, until boot
+  // migration sweeps them). Zero means nothing to back up.
+  let total=0;
+  try{
+    const idbKeys=await idb.keys();
+    for(const k of idbKeys){
+      if(typeof k==="string"&&k.startsWith(LOCAL_TABLE_PREFIX)){
+        const arr=await idb.get(k);
+        if(Array.isArray(arr))total+=arr.length;
+      }
+    }
+  }catch{}
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(!k||!k.startsWith(LOCAL_TABLE_PREFIX))continue;
+      try{
+        const arr=JSON.parse(localStorage.getItem(k)||"[]");
+        if(Array.isArray(arr))total+=arr.length;
+      }catch{}
+    }
+  }catch{}
+  return total;
+}
+async function clearLocalBackup(){
+  // Wipe both backends so we don't leave stragglers regardless of where the
+  // backup happens to live. Snapshot keys first since both stores get fragile
+  // when mutated mid-iteration.
+  let removed=0;
+  try{
+    const idbKeys=(await idb.keys()).filter(k=>typeof k==="string"&&k.startsWith(LOCAL_TABLE_PREFIX));
+    for(const k of idbKeys){await idb.delete(k);removed++;}
+  }catch{}
+  try{
+    const lsKeys=[];
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.startsWith(LOCAL_TABLE_PREFIX))lsKeys.push(k);
+    }
+    lsKeys.forEach(k=>{localStorage.removeItem(k);removed++;});
+    // Also clear the dismissed flag so the banner resets cleanly if the user
+    // ever re-enters local mode in the future.
+    localStorage.removeItem(LOCAL_BACKUP_DISMISSED_KEY);
+  }catch{}
+  return removed;
+}
+
 // ── Supabase client ───────────────────────────────────────────────────────────
+// Each method checks `u === LOCAL_URL` first and dispatches to localDb. This
+// keeps every existing call site working unchanged in both cloud and local modes.
 const sb = {
   h(k,t){return{apikey:k,Authorization:`Bearer ${t||k}`,"Content-Type":"application/json",Prefer:"return=representation"};},
-  async signIn(u,k,e,p){const r=await fetch(`${u}/auth/v1/token?grant_type=password`,{method:"POST",headers:{"Content-Type":"application/json",apikey:k},body:JSON.stringify({email:e,password:p})});return r.json();},
-  async signUp(u,k,e,p){const r=await fetch(`${u}/auth/v1/signup`,{method:"POST",headers:{"Content-Type":"application/json",apikey:k},body:JSON.stringify({email:e,password:p})});return r.json();},
-  async refresh(u,k,rt){const r=await fetch(`${u}/auth/v1/token?grant_type=refresh_token`,{method:"POST",headers:{"Content-Type":"application/json",apikey:k},body:JSON.stringify({refresh_token:rt})});return r.json();},
-  async signOut(u,k,t){try{await fetch(`${u}/auth/v1/logout`,{method:"POST",headers:this.h(k,t)});}catch{}},
-  async get(u,k,t,table,q=""){const r=await fetch(`${u}/rest/v1/${table}${q}`,{headers:this.h(k,t)});const d=await r.json();if(!r.ok)throw new Error(d.message||"Failed");return d;},
-  async post(u,k,t,table,body){const r=await fetch(`${u}/rest/v1/${table}`,{method:"POST",headers:this.h(k,t),body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.message||"Insert failed");return Array.isArray(d)?d[0]:d;},
-  async patch(u,k,t,table,id,body){const r=await fetch(`${u}/rest/v1/${table}?id=eq.${id}`,{method:"PATCH",headers:this.h(k,t),body:JSON.stringify(body)});const d=await r.json();return Array.isArray(d)?d[0]:d;},
-  async del(u,k,t,table,id){await fetch(`${u}/rest/v1/${table}?id=eq.${id}`,{method:"DELETE",headers:this.h(k,t)});},
+  async signIn(u,k,e,p){
+    if(u===LOCAL_URL)return localDb._session();
+    const r=await fetch(`${u}/auth/v1/token?grant_type=password`,{method:"POST",headers:{"Content-Type":"application/json",apikey:k},body:JSON.stringify({email:e,password:p})});return r.json();
+  },
+  async signUp(u,k,e,p){
+    if(u===LOCAL_URL)return localDb._session();
+    const r=await fetch(`${u}/auth/v1/signup`,{method:"POST",headers:{"Content-Type":"application/json",apikey:k},body:JSON.stringify({email:e,password:p})});return r.json();
+  },
+  async refresh(u,k,rt){
+    if(u===LOCAL_URL)return localDb._session();
+    const r=await fetch(`${u}/auth/v1/token?grant_type=refresh_token`,{method:"POST",headers:{"Content-Type":"application/json",apikey:k},body:JSON.stringify({refresh_token:rt})});return r.json();
+  },
+  async signOut(u,k,t){
+    if(u===LOCAL_URL)return; // No remote session to invalidate.
+    try{await fetch(`${u}/auth/v1/logout`,{method:"POST",headers:this.h(k,t)});}catch{}
+  },
+  async get(u,k,t,table,q=""){
+    if(u===LOCAL_URL)return localDb.get(table,q);
+    const r=await fetch(`${u}/rest/v1/${table}${q}`,{headers:this.h(k,t)});const d=await r.json();if(!r.ok)throw new Error(d.message||"Failed");return d;
+  },
+  async post(u,k,t,table,body,opts){
+    if(u===LOCAL_URL)return localDb.post(table,body);
+    // upsert=true sends Prefer: resolution=merge-duplicates so re-posting an
+    // existing primary key merges instead of failing — used by resumable sync.
+    const headers=opts&&opts.upsert
+      ?{...this.h(k,t),Prefer:"resolution=merge-duplicates,return=representation"}
+      :this.h(k,t);
+    const r=await fetch(`${u}/rest/v1/${table}`,{method:"POST",headers,body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.message||"Insert failed");return Array.isArray(d)?d[0]:d;
+  },
+  async patch(u,k,t,table,id,body){
+    if(u===LOCAL_URL)return localDb.patch(table,id,body);
+    const r=await fetch(`${u}/rest/v1/${table}?id=eq.${id}`,{method:"PATCH",headers:this.h(k,t),body:JSON.stringify(body)});const d=await r.json();return Array.isArray(d)?d[0]:d;
+  },
+  async del(u,k,t,table,id){
+    if(u===LOCAL_URL)return localDb.del(table,id);
+    await fetch(`${u}/rest/v1/${table}?id=eq.${id}`,{method:"DELETE",headers:this.h(k,t)});
+  },
   async upsertSettings(u,k,t,userId,settings){
+    if(u===LOCAL_URL)return localDb.upsertSettings(userId,settings);
     const r=await fetch(`${u}/rest/v1/user_settings`,{method:"POST",headers:{...this.h(k,t),Prefer:"resolution=merge-duplicates,return=representation"},body:JSON.stringify({user_id:userId,...settings})});
     return r.json();
   },
   async uploadFile(u,k,t,userId,projectId,file){
+    if(u===LOCAL_URL)return localDb.uploadFile(file);
     const ext=file.name.split(".").pop();
     const path=`${userId}/${projectId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
     const r=await fetch(`${u}/storage/v1/object/${STORAGE_BUCKET}/${path}`,{method:"POST",headers:{apikey:k,Authorization:`Bearer ${t}`,"Content-Type":file.type,"x-upsert":"true"},body:file});
@@ -415,6 +771,145 @@ async function loadUserTags(url,key,token,userId){
 }
 async function loadUserGroups(url,key,token,userId){
   try{ return await sb.get(url,key,token,"project_groups",`?user_id=eq.${userId}&order=position.asc`); }catch{ return []; }
+}
+
+// ── Local → Cloud migration (Phase 3) ─────────────────────────────────────────
+// Tables that have a user_id column — user_id must be rewritten from
+// LOCAL_USER_ID to the freshly-authenticated Supabase user.id before insert.
+const TABLES_WITH_USER_ID=new Set(["projects","tags","project_groups","user_settings","project_templates"]);
+// Insert order respects foreign keys: parents first, children second.
+// project_tags depends on both projects and tags, so it goes after both.
+// issue_comments depends on issues. github_cache depends on projects.
+const MIGRATION_ORDER=[
+  "tags","project_groups","user_settings","project_templates",
+  "projects",
+  "versions","milestones","notes","todos","assets","issues","ideas","concepts",
+  "build_logs","environments","dependencies","sprints","time_sessions",
+  "snippets","daily_logs","github_cache",
+  "project_tags",
+  "issue_comments",
+];
+// Decode a data URL into a File suitable for sb.uploadFile.
+// Returns null if the string isn't a recognizable base64 data URL.
+function dataUrlToFile(dataUrl,fallbackName="migrated"){
+  const m=String(dataUrl).match(/^data:([^;]+);base64,(.+)$/);
+  if(!m)return null;
+  const mime=m[1];
+  const ext=(mime.split("/")[1]||"bin").split("+")[0]; // image/svg+xml → svg
+  let bytes;
+  try{ bytes=atob(m[2]); }catch{ return null; }
+  const arr=new Uint8Array(bytes.length);
+  for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);
+  const blob=new Blob([arr],{type:mime});
+  return new File([blob],`${fallbackName}.${ext}`,{type:mime});
+}
+
+// Walk any value (string/array/plain object) and replace every `data:` URL by
+// awaiting `replaceFn(dataUrl)`. Returns a new value with replacements applied.
+// Pass-through for everything that isn't a data URL string.
+async function rewriteDataUrls(value,replaceFn){
+  if(typeof value==="string"&&value.startsWith("data:")){
+    try{ return await replaceFn(value); }catch{ return value; }
+  }
+  if(Array.isArray(value)){
+    const out=new Array(value.length);
+    for(let i=0;i<value.length;i++)out[i]=await rewriteDataUrls(value[i],replaceFn);
+    return out;
+  }
+  if(value&&typeof value==="object"){
+    const out={};
+    for(const k of Object.keys(value))out[k]=await rewriteDataUrls(value[k],replaceFn);
+    return out;
+  }
+  return value;
+}
+
+async function migrateLocalToCloud(url,key,token,newUserId,onProgress){
+  // Pre-flight: allow if the cloud account is empty OR every cloud project's
+  // id already exists in the local set (resumed sync after partial failure).
+  // Refuse only if the cloud has projects with foreign ids — merging arbitrary
+  // accounts is dangerous and we don't have conflict resolution for it.
+  const existing=await sb.get(url,key,token,"projects",`?user_id=eq.${newUserId}&order=position.asc`);
+  if(existing&&existing.length){
+    const localProjectIds=new Set((await localDb._read("projects")).map(p=>String(p.id)));
+    const foreign=existing.filter(p=>!localProjectIds.has(String(p.id)));
+    if(foreign.length){
+      throw new Error(`This Supabase account already has ${foreign.length} project${foreign.length===1?"":"s"} that aren't from this device. Local-to-cloud sync requires either an empty account or one whose projects all came from a previous (partial) sync from this device.`);
+    }
+    // All cloud ids ⊆ local ids → this is a resume. Tell the caller via
+    // progress so the UI can show "Resuming…" rather than "Starting…".
+    onProgress?.({phase:"resume",total:0,uploaded:0,table:null,foundCloudRows:existing.length});
+  }
+  // Tally rows up front for progress reporting.
+  const counts={};
+  let total=0;
+  for(const table of MIGRATION_ORDER){
+    const rows=await localDb._read(table);
+    counts[table]=rows.length;
+    total+=rows.length;
+  }
+  if(total===0)return{total:0,uploaded:0,counts};
+  let uploaded=0;
+  onProgress?.({phase:"start",total,uploaded,table:null});
+  for(const table of MIGRATION_ORDER){
+    const rows=await localDb._read(table);
+    if(!rows.length)continue;
+    onProgress?.({phase:"table",total,uploaded,table,tableTotal:rows.length});
+    // Rewrite user_id, then walk each row and turn any inline data: URLs
+    // into real Supabase Storage uploads. Doing this row-by-row (rather than
+    // post-hoc) keeps the cloud DB free of base64 bloat and gives us the
+    // proper public URLs in place before insert.
+    const transformed=[];
+    for(const r of rows){
+      const withUser={...r};
+      if(TABLES_WITH_USER_ID.has(table))withUser.user_id=newUserId;
+      const projectId=withUser.project_id||"global";
+      const rewritten=await rewriteDataUrls(withUser,async dataUrl=>{
+        const file=dataUrlToFile(dataUrl);
+        if(!file)return dataUrl;
+        return await sb.uploadFile(url,key,token,newUserId,projectId,file);
+      });
+      transformed.push(rewritten);
+    }
+    // user_settings has a unique constraint on user_id — a fresh Supabase
+    // account may already have a default row that would make plain INSERT
+    // fail with a uniqueness violation. Use upsertSettings instead so the
+    // local row merges into whatever's already there.
+    if(table==="user_settings"){
+      for(const row of transformed){
+        const {id:_id,user_id:_uid,created_at:_ca,...settings}=row;
+        try{
+          await sb.upsertSettings(url,key,token,newUserId,settings);
+        }catch(e){
+          throw new Error(`Failed uploading user_settings: ${e.message||e}`);
+        }
+        uploaded++;
+        onProgress?.({phase:"table",total,uploaded,table,tableTotal:rows.length});
+      }
+      continue;
+    }
+    // Batch inserts in groups of 50 — keeps individual requests small enough
+    // to fit Supabase's body-size limits on slow links and gives progress
+    // updates more frequently than a single bulk insert would.
+    const BATCH=50;
+    for(let i=0;i<transformed.length;i+=BATCH){
+      const slice=transformed.slice(i,i+BATCH);
+      try{
+        // upsert:true → idempotent on primary key. Lets a retry of a partial
+        // sync re-post all rows safely; matching ids merge, new ones insert.
+        await sb.post(url,key,token,table,slice,{upsert:true});
+      }catch(e){
+        // Surface enough context that the user can tell what failed without
+        // having to dig through the network tab. Any partial state stays;
+        // running the sync again is now safe thanks to upsert semantics.
+        throw new Error(`Failed uploading "${table}" (batch ${Math.floor(i/BATCH)+1}): ${e.message||e}`);
+      }
+      uploaded+=slice.length;
+      onProgress?.({phase:"table",total,uploaded,table,tableTotal:rows.length});
+    }
+  }
+  onProgress?.({phase:"done",total,uploaded,table:null});
+  return{total,uploaded,counts};
 }
 
 // ── Activity feed builder (cross-project) ─────────────────────────────────────
@@ -876,6 +1371,24 @@ export default function QoderApp() {
   const [updateStatus,    setUpdateStatus]    = useState(null); // null | "available" | "downloading" | "ready" | "current" | "error"
   const [updateError,     setUpdateError]     = useState("");
   const [downloadPct,     setDownloadPct]     = useState(0);
+  // Phase 3.5: leftover local-mode data after sync. Banner shows while a
+  // backup exists (in IDB or legacy localStorage) and the user hasn't
+  // dismissed it. The count is populated asynchronously since IDB is async.
+  const [localBackupCount,setLocalBackupCount]=useState(0);
+  const [localBackupDismissed,setLocalBackupDismissed]=useState(()=>{try{return localStorage.getItem(LOCAL_BACKUP_DISMISSED_KEY)==="1";}catch{return false;}});
+  const [localBackupConfirming,setLocalBackupConfirming]=useState(false);
+  // One-time migration of legacy localStorage tables into IDB on boot, then
+  // populate the backup count from whichever backend(s) hold data. Safe to
+  // run regardless of mode — no-ops if there's nothing to migrate.
+  useEffect(()=>{
+    let cancelled=false;
+    (async()=>{
+      try{ await migrateLocalStorageToIdb(); }catch{}
+      const n=await getLocalBackupCount();
+      if(!cancelled)setLocalBackupCount(n);
+    })();
+    return()=>{cancelled=true;};
+  },[]);
   const [cmdPalette,      setCmdPalette]      = useState(false);
   const [draggedTodo,     setDraggedTodo]     = useState(null); // {todo, sourcePid}
   const [dragOverPid,     setDragOverPid]     = useState(null);
@@ -1058,8 +1571,34 @@ export default function QoderApp() {
     (async()=>{
       try{
         const r=await store.get(CFG_KEY);
-        if(!r){setScreen("setup");return;}
+        // No saved cfg yet → land on unified auth screen (Supabase fields blank).
+        if(!r){if(typeof document!=="undefined")document.body.style.overflow="";setScreen("auth");return;}
         const saved=JSON.parse(r.value);
+        // Local-only mode: synthesize session, load local data, skip Supabase auth refresh.
+        if(saved.localOnly){
+          const nextCfg={url:LOCAL_URL,key:"local",localOnly:true};
+          const sess={access_token:"local",refresh_token:"local",user:{id:LOCAL_USER_ID,email:"local@qoder.app"}};
+          setCfg(nextCfg);
+          setSession(sess);
+          try{
+            const pjs=await loadProjects(LOCAL_URL,"local",sess.access_token,sess.user.id);
+            setProjects(pjs);
+            const tags=await loadUserTags(LOCAL_URL,"local",sess.access_token,sess.user.id);
+            setUserTags(tags);
+            try{const grps=await loadUserGroups(LOCAL_URL,"local",sess.access_token,sess.user.id);setGroups(grps);}catch{}
+            try{
+              const sett=await sb.get(LOCAL_URL,"local",sess.access_token,"user_settings",`?user_id=eq.${sess.user.id}`);
+              if(sett?.[0]?.tab_order){setTabOrder(mergeTabOrder(sett[0].tab_order));}
+              if(sett?.[0]?.custom_statuses)setCustomStatuses(sett[0].custom_statuses||{});
+              if(sett?.[0]?.theme&&sett[0].theme!=="dark"){saveTheme(sett[0].theme);}
+              if(sett?.[0]?.accent_color&&sett[0].accent_color!=="#00D4FF"){saveAccent(sett[0].accent_color);}
+              if(sett?.[0]?.workspace_data){const wd=sett[0].workspace_data;setWorkspace({notes:wd.notes||[],ideas:wd.ideas||[],snippets:wd.snippets||[]});}
+              else{try{const d=JSON.parse(localStorage.getItem("q-workspace")||"{}");if(d.notes||d.ideas||d.snippets)setWorkspace({notes:d.notes||[],ideas:d.ideas||[],snippets:d.snippets||[]});}catch{}}
+            }catch{}
+          }catch{}
+          if(typeof document!=="undefined")document.body.style.overflow="";
+          setScreen("app");return;
+        }
         setCfg({url:saved.url,key:saved.key});
         if(saved.session?.refresh_token){
           const res=await sb.refresh(saved.url,saved.key,saved.session.refresh_token);
@@ -1091,7 +1630,7 @@ export default function QoderApp() {
           }
         }
         if(typeof document!=="undefined")document.body.style.overflow="";setScreen("auth");
-      }catch{if(typeof document!=="undefined")document.body.style.overflow="";setScreen("setup");}
+      }catch{if(typeof document!=="undefined")document.body.style.overflow="";setScreen("auth");}
     })();
   },[]);
 
@@ -1312,21 +1851,57 @@ export default function QoderApp() {
   },[screen,cfg,session,selProj,view,projTab,tabOrder]);
 
   // ── Auth ────────────────────────────────────────────────────────────────────
-  const handleSetup=async(url,key)=>{const c={url:url.replace(/\/$/,""),key};await store.set(CFG_KEY,JSON.stringify(c));setCfg(c);setScreen("auth");};
-  const handleAuth=async(email,pw,isSignUp)=>{
+  // Local-only mode: synthesize a session, persist cfg with localOnly:true,
+  // and route the same loadProjects/loadUserTags/loadUserGroups path through
+  // sb.* (which dispatches to localDb when url===LOCAL_URL). No server I/O.
+  const handleLocal=async()=>{
     setBusy(true);
     try{
-      const res=isSignUp?await sb.signUp(cfg.url,cfg.key,email,pw):await sb.signIn(cfg.url,cfg.key,email,pw);
+      const nextCfg={url:LOCAL_URL,key:"local",localOnly:true};
+      const sess={access_token:"local",refresh_token:"local",user:{id:LOCAL_USER_ID,email:"local@qoder.app"}};
+      setCfg(nextCfg);
+      setSession(sess);
+      await persistCfg(nextCfg,sess);
+      const pjs=await loadProjects(nextCfg.url,nextCfg.key,sess.access_token,sess.user.id);
+      setProjects(pjs);
+      const tags=await loadUserTags(nextCfg.url,nextCfg.key,sess.access_token,sess.user.id);
+      setUserTags(tags);
+      try{const grps=await loadUserGroups(nextCfg.url,nextCfg.key,sess.access_token,sess.user.id);setGroups(grps);}catch{}
+      try{
+        const sett=await sb.get(nextCfg.url,nextCfg.key,sess.access_token,"user_settings",`?user_id=eq.${sess.user.id}`);
+        if(sett?.[0]?.tab_order){setTabOrder(mergeTabOrder(sett[0].tab_order));}
+        if(sett?.[0]?.custom_statuses)setCustomStatuses(sett[0].custom_statuses||{});
+        if(sett?.[0]?.theme&&sett[0].theme!=="dark"){saveTheme(sett[0].theme);}
+        if(sett?.[0]?.accent_color&&sett[0].accent_color!=="#00D4FF"){saveAccent(sett[0].accent_color);}
+        if(sett?.[0]?.workspace_data){const wd=sett[0].workspace_data;setWorkspace({notes:wd.notes||[],ideas:wd.ideas||[],snippets:wd.snippets||[]});}
+        else{try{const d=JSON.parse(localStorage.getItem("q-workspace")||"{}");if(d.notes||d.ideas||d.snippets)setWorkspace({notes:d.notes||[],ideas:d.ideas||[],snippets:d.snippets||[]});}catch{}}
+      }catch{}
+      setScreen("app");
+    }catch(e){
+      showToast("Could not start local mode: "+(e.message||e),"err");
+    }finally{
+      setBusy(false);
+    }
+  };
+  const handleAuth=async(email,pw,isSignUp,url,key)=>{
+    setBusy(true);
+    try{
+      // Persist the URL/key the user typed into the form BEFORE authenticating,
+      // so a refresh/relaunch finds the same cfg and so handleSignOut doesn't lose it.
+      const nextCfg={url:url.replace(/\/$/,""),key};
+      setCfg(nextCfg);
+      await store.set(CFG_KEY,JSON.stringify(nextCfg));
+      const res=isSignUp?await sb.signUp(nextCfg.url,nextCfg.key,email,pw):await sb.signIn(nextCfg.url,nextCfg.key,email,pw);
       if(res.access_token){
         const sess={access_token:res.access_token,refresh_token:res.refresh_token,user:res.user};
-        setSession(sess);await persistCfg(cfg,sess);
-        const pjs=await loadProjects(cfg.url,cfg.key,res.access_token,res.user.id);
+        setSession(sess);await persistCfg(nextCfg,sess);
+        const pjs=await loadProjects(nextCfg.url,nextCfg.key,res.access_token,res.user.id);
         setProjects(pjs);
-        const tags=await loadUserTags(cfg.url,cfg.key,res.access_token,res.user.id);
+        const tags=await loadUserTags(nextCfg.url,nextCfg.key,res.access_token,res.user.id);
         setUserTags(tags);
-        try{const grps3=await loadUserGroups(cfg.url,cfg.key,res.access_token,res.user.id);setGroups(grps3);}catch{}
+        try{const grps3=await loadUserGroups(nextCfg.url,nextCfg.key,res.access_token,res.user.id);setGroups(grps3);}catch{}
         try{
-          const sett=await sb.get(cfg.url,cfg.key,res.access_token,"user_settings",`?user_id=eq.${res.user.id}`);
+          const sett=await sb.get(nextCfg.url,nextCfg.key,res.access_token,"user_settings",`?user_id=eq.${res.user.id}`);
           if(sett?.[0]?.tab_order){setTabOrder(mergeTabOrder(sett[0].tab_order));}
           if(sett?.[0]?.custom_statuses)setCustomStatuses(sett[0].custom_statuses||{});
           if(sett?.[0]?.theme&&sett[0].theme!=="dark"){saveTheme(sett[0].theme);}
@@ -1357,7 +1932,58 @@ export default function QoderApp() {
       setBusy(false);
     }
   };
-  const handleSignOut=async()=>{await sb.signOut(cfg.url,cfg.key,session.access_token);await store.set(CFG_KEY,JSON.stringify({url:cfg.url,key:cfg.key}));setSession(null);setProjects([]);setScreen("auth");};
+  // Phase 3: migrate local data into a freshly-authenticated Supabase project.
+  // Called by SyncToCloudModal once the user has signed in/up to the new project.
+  // Throws on failure; on success, switches the running app into cloud mode
+  // and reloads projects from the cloud.
+  const handleSyncToCloud=async(cloudUrl,cloudKey,sess,onProgress)=>{
+    const cleanUrl=cloudUrl.replace(/\/$/,"");
+    await migrateLocalToCloud(cleanUrl,cloudKey,sess.access_token,sess.user.id,onProgress);
+    // Switch to cloud mode. Local tables stay in localStorage as a backup —
+    // the user can clear browser storage manually if they want them gone.
+    const nextCfg={url:cleanUrl,key:cloudKey};
+    setCfg(nextCfg);
+    setSession(sess);
+    await persistCfg(nextCfg,sess);
+    // Reload everything from the cloud so the in-memory state matches what's
+    // now on the server (including any IDs Supabase assigned during insert).
+    const pjs=await loadProjects(cleanUrl,cloudKey,sess.access_token,sess.user.id);
+    setProjects(pjs);
+    const tags=await loadUserTags(cleanUrl,cloudKey,sess.access_token,sess.user.id);
+    setUserTags(tags);
+    try{const grps=await loadUserGroups(cleanUrl,cloudKey,sess.access_token,sess.user.id);setGroups(grps);}catch{}
+    // Surface the "your local backup is still on this device" banner once
+    // we've successfully landed in cloud mode. Resetting the dismissed flag
+    // here too — a fresh sync deserves a fresh banner.
+    try{localStorage.removeItem(LOCAL_BACKUP_DISMISSED_KEY);}catch{}
+    setLocalBackupDismissed(false);
+    setLocalBackupCount(await getLocalBackupCount());
+  };
+
+  const handleClearLocalBackup=async()=>{
+    const removed=await clearLocalBackup();
+    setLocalBackupCount(0);
+    setLocalBackupConfirming(false);
+    showToast(removed?"Local backup cleared":"Nothing to clear","ok");
+  };
+  const handleDismissLocalBackup=()=>{
+    try{localStorage.setItem(LOCAL_BACKUP_DISMISSED_KEY,"1");}catch{}
+    setLocalBackupDismissed(true);
+    setLocalBackupConfirming(false);
+  };
+
+  const handleSignOut=async()=>{
+    await sb.signOut(cfg.url,cfg.key,session.access_token);
+    // Local-mode signout returns user to the auth screen (data stays in localStorage).
+    // Cloud-mode signout preserves cfg.url and cfg.key so the form is pre-filled.
+    if(cfg.localOnly){
+      await store.set(CFG_KEY,JSON.stringify({localOnly:true}));
+      setCfg({url:"",key:""});
+    }else{
+      await store.set(CFG_KEY,JSON.stringify({url:cfg.url,key:cfg.key}));
+    }
+    setSession(null);setProjects([]);setScreen("auth");
+  };
 
   const T=()=>session.access_token;
   const mutate=(pid,fn)=>{const next=projects.map(p=>p.id===pid?fn(p):p);setProjects(next);setSelProj(next.find(p=>p.id===pid)||null);};
@@ -1816,7 +2442,13 @@ export default function QoderApp() {
   };
   const unassignTag=async(pid,tagId)=>{
     try{
-      await fetch(`${cfg.url}/rest/v1/project_tags?project_id=eq.${pid}&tag_id=eq.${tagId}`,{method:"DELETE",headers:sb.h(cfg.key,T())});
+      if(cfg.url===LOCAL_URL){
+        // Composite-key delete — not expressible via sb.del, so go through localDb.
+        const rows=(await localDb._read("project_tags")).filter(r=>!(String(r.project_id)===String(pid)&&String(r.tag_id)===String(tagId)));
+        await localDb._write("project_tags",rows);
+      }else{
+        await fetch(`${cfg.url}/rest/v1/project_tags?project_id=eq.${pid}&tag_id=eq.${tagId}`,{method:"DELETE",headers:sb.h(cfg.key,T())});
+      }
       mutate(pid,p=>({...p,tagIds:(p.tagIds||[]).filter(id=>id!==tagId)}));
     }catch(e){showToast(e.message,"err");}
   };
@@ -1951,7 +2583,16 @@ export default function QoderApp() {
       setGhCache(c=>({...c,[pid]:data}));
       try{
         const ex=await sb.get(cfg.url,cfg.key,T(),"github_cache",`?project_id=eq.${pid}`);
-        if(ex.length){await fetch(`${cfg.url}/rest/v1/github_cache?project_id=eq.${pid}`,{method:"PATCH",headers:sb.h(cfg.key,T()),body:JSON.stringify({data,fetched_at:data.fetchedAt})});}
+        if(ex.length){
+          if(cfg.url===LOCAL_URL){
+            // Composite-filter patch — not expressible via sb.patch's id-only API.
+            const rows=await localDb._read("github_cache");
+            const idx=rows.findIndex(r=>String(r.project_id)===String(pid));
+            if(idx>=0){rows[idx]={...rows[idx],data,fetched_at:data.fetchedAt};await localDb._write("github_cache",rows);}
+          }else{
+            await fetch(`${cfg.url}/rest/v1/github_cache?project_id=eq.${pid}`,{method:"PATCH",headers:sb.h(cfg.key,T()),body:JSON.stringify({data,fetched_at:data.fetchedAt})});
+          }
+        }
         else{await sb.post(cfg.url,cfg.key,T(),"github_cache",{project_id:pid,data,fetched_at:data.fetchedAt});}
       }catch{}
       if(data.error)showToast("GitHub rate limited. Add a token for higher limits.","info");
@@ -1992,8 +2633,7 @@ export default function QoderApp() {
     .filter(p=>p.name.toLowerCase().includes(search.toLowerCase())||(p.description||"").toLowerCase().includes(search.toLowerCase()));
 
   if(screen==="loading")return<Splash msg="Loading…"/>;
-  if(screen==="setup")  return<SetupScreen onSubmit={handleSetup}/>;
-  if(screen==="auth")   return<AuthScreen onAuth={handleAuth} busy={busy} onReset={()=>setScreen("setup")}/>;
+  if(screen==="auth")   return<AuthScreen onAuth={handleAuth} onLocal={handleLocal} busy={busy} initialCfg={cfg}/>;
 
   const liveProj=selProj?(projects.find(p=>p.id===selProj.id)||selProj):null;
 
@@ -2191,8 +2831,13 @@ export default function QoderApp() {
           <div style={s.sidebarFoot}>
             <button className="q-btn-new" onClick={()=>{openModal("add-project",{status:"planning",techStack:[],tagIds:[],allProjects:projects,dependsOn:[]});if(isMobile)setSidebarOpen(false);}}>+ New Project</button>
             <div style={{marginTop:10,display:"flex",gap:8,justifyContent:"space-between",alignItems:"center"}}>
-              <span style={s.userEmail}>{session.user.email}</span>
+              <span style={s.userEmail}>{cfg.localOnly?"Local mode":session.user.email}</span>
             </div>
+            {cfg.localOnly&&(
+              <button className="q-icon-btn" style={{width:"100%",marginTop:8,textAlign:"center",padding:"8px 12px",background:"rgba(0,212,255,.08)",border:"1px solid rgba(0,212,255,.3)",color:"var(--accent)",fontSize:12,cursor:"pointer",borderRadius:8,fontFamily:"'JetBrains Mono'"}} title="Move local data to a Supabase project" onClick={()=>openModal("sync-to-cloud",{})}>
+                ☁ Sync to Supabase
+              </button>
+            )}
             <div style={{display:"flex",gap:6,marginTop:8}}>
               <button className="q-icon-btn" style={{flex:1,textAlign:"center"}} title="Settings" onClick={()=>openModal("settings",{})}>⚙ Settings</button>
               <button className="q-sign-out" title="Sign out" onClick={handleSignOut}>⎋</button>
@@ -2210,6 +2855,36 @@ export default function QoderApp() {
       {/* Main */}
       <main style={s.main}>
         {isMobile&&<div style={s.mobileHeader}><button style={s.hamburger} onClick={()=>setSidebarOpen(v=>!v)}>☰</button><div style={{display:"flex",alignItems:"baseline",gap:2}}><span style={{fontFamily:"'Syne'",fontSize:18,fontWeight:800,color:"#00D4FF"}}>Q</span><span style={{fontFamily:"'Syne'",fontSize:15,fontWeight:700,color:"var(--txt)"}}>oder</span></div><div style={{display:"flex",gap:8,alignItems:"center"}}><RefreshBtn onRefresh={doRefresh}/><button className="q-btn-primary" style={{padding:"6px 12px",fontSize:12}} onClick={()=>{openModal("add-project",{status:"planning",techStack:[]});setSidebarOpen(false);}}>+</button></div></div>}
+
+        {/* Phase 3.5: leftover local-backup banner.
+            Shown only when we're in cloud mode AND a non-empty qoder-local-table:* set
+            exists AND the user hasn't dismissed it. Two-step confirmation on Clear so
+            destructive action requires deliberate intent. */}
+        {!cfg.localOnly&&localBackupCount>0&&!localBackupDismissed&&(
+          <div style={{margin:"12px 16px 0",padding:"10px 14px",background:"rgba(255,179,71,.08)",border:"1px solid rgba(255,179,71,.35)",borderRadius:8,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <span style={{fontSize:18,flexShrink:0}}>📦</span>
+            <div style={{flex:1,minWidth:200}}>
+              <div style={{color:"#FFB347",fontFamily:"'Syne'",fontWeight:600,fontSize:13,marginBottom:2}}>Local backup still on this device</div>
+              <div style={{color:"var(--txt-muted)",fontSize:12,lineHeight:1.45}}>
+                {localBackupCount} record{localBackupCount===1?"":"s"} from before sync. Cloud data is unaffected.
+                {localBackupConfirming&&" Are you sure? This deletes the local copy and can't be undone."}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:6,flexShrink:0}}>
+              {localBackupConfirming?(
+                <>
+                  <button onClick={()=>setLocalBackupConfirming(false)} style={{padding:"6px 12px",background:"none",border:"1px solid rgba(255,255,255,.12)",borderRadius:6,color:"var(--txt-muted)",fontSize:12,cursor:"pointer",fontFamily:"'JetBrains Mono'"}}>Cancel</button>
+                  <button onClick={handleClearLocalBackup} style={{padding:"6px 12px",background:"#FF4466",border:"1px solid #FF4466",borderRadius:6,color:"#fff",fontSize:12,cursor:"pointer",fontFamily:"'JetBrains Mono'",fontWeight:600}}>Yes, delete</button>
+                </>
+              ):(
+                <>
+                  <button onClick={handleDismissLocalBackup} style={{padding:"6px 12px",background:"none",border:"1px solid rgba(255,255,255,.12)",borderRadius:6,color:"var(--txt-muted)",fontSize:12,cursor:"pointer",fontFamily:"'JetBrains Mono'"}}>Hide</button>
+                  <button onClick={()=>setLocalBackupConfirming(true)} style={{padding:"6px 12px",background:"rgba(255,70,102,.15)",border:"1px solid rgba(255,70,102,.4)",borderRadius:6,color:"#FF4466",fontSize:12,cursor:"pointer",fontFamily:"'JetBrains Mono'"}}>Clear backup</button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
         {view==="workspace"&&<WorkspaceView
             workspace={workspace}
@@ -2371,6 +3046,7 @@ export default function QoderApp() {
         {modal==="save-template" &&<SaveTemplateModal data={form} setData={setForm} onSubmit={d=>{saveTemplate(selProj.id,d.name);closeModal();}} onCancel={closeModal}/>}
         {modal==="manage-templates"&&<ManageTemplatesModal templates={templates} onDelete={deleteTemplate} onApply={tid=>{if(selProj){applyTemplate(selProj.id,tid);}closeModal();}} onCancel={closeModal}/>}
         {modal==="settings"     &&<SettingsModal tabOrder={tabOrder} userTags={userTags} templates={templates} updateStatus={updateStatus} updateError={updateError} theme={theme} accentColor={accentColor} customStatuses={customStatuses} onCheckForUpdates={handleCheckForUpdates} onSave={order=>saveTabOrderSync(order)} onSavePreferences={prefs=>{savePreferences(prefs);closeModal();}} onAddTag={addTag} onDeleteTag={deleteTag} onOpenTemplates={()=>openModal("manage-templates",{})} onCancel={closeModal} currentProject={view==="project"?selProj:null} onSaveProjectTabOrder={(pid,order)=>saveProjectTabOrder(pid,order)}/>}
+        {modal==="sync-to-cloud"&&<SyncToCloudModal onMigrate={handleSyncToCloud} onSuccess={({total})=>{showToast(total?`Synced ${total} record${total===1?"":"s"} to Supabase`:"Connected to Supabase","ok");closeModal();}} onCancel={closeModal}/>}
       </ModalWrap>}
     </div>
   );
@@ -2393,28 +3069,38 @@ function Lightbox({url,name,onClose}){
 }
 
 // ── Auth screens ──────────────────────────────────────────────────────────────
-function SetupScreen({onSubmit}){
-  const [url,setUrl]=useState("");const[key,setKey]=useState("");
-  return(<div style={s.authWrap}><style>{css}</style><style>{buildThemeCSS("dark","#00D4FF")}</style><div style={s.authBox}>
-    <div style={{textAlign:"center",marginBottom:28}}><img src="qoder-icon.png" style={{width:52,height:52,marginBottom:8}} onError={e=>e.target.style.display="none"}/><div style={{fontFamily:"'Syne'",fontSize:20,fontWeight:800,color:"#E8EAF6",marginBottom:4}}>Connect Supabase</div></div>
-    <Field label="Project URL"><QInput className="q-input" value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://xxxx.supabase.co"/></Field>
-    <Field label="Anon / Public Key"><QInput className="q-input" value={key} onChange={e=>setKey(e.target.value)} placeholder="eyJhbGciOiJ…" style={{fontFamily:"'JetBrains Mono'",fontSize:12}}/></Field>
-    <button className="q-btn-primary" style={{width:"100%",marginTop:8}} onClick={()=>url.trim()&&key.trim()&&onSubmit(url.trim(),key.trim())}>Connect →</button>
-  </div></div>);
-}
-function AuthScreen({onAuth,busy,onReset}){
+// Unified login + setup screen.
+// - Email/password are always visible.
+// - Supabase URL/key are inside a collapsible "Sync with Supabase" section.
+//   Pre-expanded if cfg already has values (returning user) so they're visible
+//   for editing; collapsed for fresh installs to keep the surface clean.
+// - "Continue locally" enters local-only mode (handleLocal in App). Local
+//   users can later upload their data to a fresh Supabase project via the
+//   "Sync to Supabase" button in the sidebar footer (SyncToCloudModal).
+function AuthScreen({onAuth,onLocal,busy,initialCfg}){
   const [isSignUp,setIsSignUp]=useState(false);
   const [email,setEmail]=useState("");
   const [pw,setPw]=useState("");
   const [showPw,setShowPw]=useState(false);
+  // Treat the local-mode sentinel as "no cfg" so its sentinel values never
+  // appear in the form.
+  const cfgIsCloud=initialCfg?.url&&initialCfg.url!==LOCAL_URL;
+  const [url,setUrl]=useState(cfgIsCloud?initialCfg.url:"");
+  const [key,setKey]=useState(cfgIsCloud?initialCfg.key:"");
+  const [showSync,setShowSync]=useState(!!cfgIsCloud);
   const [errMsg,setErrMsg]=useState("");
   const [localBusy,setLocalBusy]=useState(false);
 
   const doAuth=async()=>{
     setErrMsg("");
+    if(!url.trim()||!key.trim()){
+      setErrMsg("Add a Supabase URL and key to sign in, or use Continue locally.");
+      setShowSync(true);
+      return;
+    }
     setLocalBusy(true);
     try{
-      await onAuth(email,pw,isSignUp);
+      await onAuth(email.trim(),pw,isSignUp,url.trim(),key.trim());
     }catch(e){
       setErrMsg(e.message||"Unknown error");
     }finally{
@@ -2425,7 +3111,7 @@ function AuthScreen({onAuth,busy,onReset}){
   const isDisabled=busy||localBusy||!email.trim()||!pw.trim();
 
   return(<div style={s.authWrap}><style>{css}</style><style>{buildThemeCSS("dark","#00D4FF")}</style><div style={s.authBox}>
-    <div style={{textAlign:"center",marginBottom:28}}>
+    <div style={{textAlign:"center",marginBottom:24}}>
       <div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:2,marginBottom:6}}>
         <span style={{fontFamily:"'Syne'",fontSize:40,fontWeight:800,color:"#00D4FF"}}>Q</span>
         <span style={{fontFamily:"'Syne'",fontSize:30,fontWeight:700,color:"#E8EAF6",letterSpacing:"-.5px"}}>oder</span>
@@ -2441,15 +3127,128 @@ function AuthScreen({onAuth,busy,onReset}){
         <button onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"#8B8FA8",fontSize:12,background:"none",border:"none",cursor:"pointer"}}>{showPw?"hide":"show"}</button>
       </div>
     </Field>
-    {errMsg&&<div style={{marginTop:8,padding:"9px 12px",background:"rgba(255,70,102,.12)",border:"1px solid rgba(255,70,102,.35)",borderRadius:8,color:"#FF4466",fontSize:13,fontFamily:"'JetBrains Mono'"}}>{errMsg}</div>}
-    <button className="q-btn-primary" style={{width:"100%",marginTop:12,opacity:isDisabled?.6:1}} disabled={isDisabled} onClick={doAuth}>
+    <button onClick={()=>setShowSync(v=>!v)} style={{marginTop:10,padding:"6px 0",fontSize:12,color:"#8B8FA8",background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:8,fontFamily:"'JetBrains Mono'"}}>
+      <span style={{fontSize:9,transform:showSync?"rotate(90deg)":"none",transition:"transform .15s",display:"inline-block"}}>▶</span>
+      Sync with Supabase {(url&&key)?"":"(optional)"}
+    </button>
+    {showSync&&(
+      <div style={{marginTop:8,padding:"12px 14px",background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.06)",borderRadius:10}}>
+        <div style={{fontSize:11,color:"#8B8FA8",marginBottom:10,lineHeight:1.45}}>Required to sign in or sync across devices. Leave blank to use Qoder locally on this device.</div>
+        <Field label="Project URL">
+          <QInput className="q-input" value={url} onChange={e=>{setUrl(e.target.value);setErrMsg("");}} placeholder="https://xxxx.supabase.co"/>
+        </Field>
+        <Field label="Anon / Public Key">
+          <QInput className="q-input" value={key} onChange={e=>{setKey(e.target.value);setErrMsg("");}} placeholder="eyJhbGciOiJ…" style={{fontFamily:"'JetBrains Mono'",fontSize:12}}/>
+        </Field>
+      </div>
+    )}
+    {errMsg&&<div style={{marginTop:12,padding:"9px 12px",background:"rgba(255,70,102,.12)",border:"1px solid rgba(255,70,102,.35)",borderRadius:8,color:"#FF4466",fontSize:13,fontFamily:"'JetBrains Mono'"}}>{errMsg}</div>}
+    <button className="q-btn-primary" style={{width:"100%",marginTop:14,opacity:isDisabled?.6:1}} disabled={isDisabled} onClick={doAuth}>
       {(busy||localBusy)?"Signing in…":isSignUp?"Create Account":"Sign In →"}
     </button>
-    <div style={{display:"flex",justifyContent:"space-between",marginTop:16,fontSize:13}}>
+    <button onClick={onLocal} style={{width:"100%",marginTop:8,padding:"10px 14px",background:"none",border:"1px solid rgba(255,255,255,.12)",borderRadius:10,color:"#8B8FA8",fontSize:13,cursor:"pointer",fontFamily:"'JetBrains Mono'"}}>
+      Continue locally →
+    </button>
+    <div style={{display:"flex",justifyContent:"center",marginTop:16,fontSize:13}}>
       <button onClick={()=>{setIsSignUp(v=>!v);setErrMsg("");}} style={{color:"#00D4FF",background:"none",border:"none",cursor:"pointer"}}>{isSignUp?"Already have an account?":"Create an account"}</button>
-      <button onClick={onReset} style={{color:"#8B8FA8",background:"none",border:"none",cursor:"pointer",fontSize:12}}>Change project</button>
     </div>
   </div></div>);
+}
+
+// Phase 3: migrate a local-only user into a Supabase project.
+// Flow: collect URL/key + email/password → sign in or sign up → migrate every
+// local table to Supabase → switch the running app into cloud mode.
+// Refuses to overwrite an account that already has projects (see migrateLocalToCloud).
+function SyncToCloudModal({onMigrate,onSuccess,onCancel}){
+  const [isSignUp,setIsSignUp]=useState(true); // most users connecting from local are creating their first cloud project
+  const [url,setUrl]=useState("");
+  const [key,setKey]=useState("");
+  const [email,setEmail]=useState("");
+  const [pw,setPw]=useState("");
+  const [showPw,setShowPw]=useState(false);
+  const [errMsg,setErrMsg]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [progress,setProgress]=useState(null); // {phase,total,uploaded,table,tableTotal}
+
+  const allFilled=url.trim()&&key.trim()&&email.trim()&&pw.trim();
+
+  const run=async()=>{
+    setErrMsg("");
+    setBusy(true);
+    setProgress(null);
+    try{
+      const cleanUrl=url.trim().replace(/\/$/,"");
+      const cleanKey=key.trim();
+      const res=isSignUp
+        ?await sb.signUp(cleanUrl,cleanKey,email.trim(),pw)
+        :await sb.signIn(cleanUrl,cleanKey,email.trim(),pw);
+      if(!res.access_token){
+        // Sign-up may require email confirmation — surface that clearly.
+        if(isSignUp&&res.id)throw new Error("Account created — please confirm your email before syncing. Then come back and choose 'Sign In' here.");
+        throw new Error(res.error_description||res.error||res.msg||res.message||"Authentication failed");
+      }
+      const sess={access_token:res.access_token,refresh_token:res.refresh_token,user:res.user};
+      const result=await onMigrate(cleanUrl,cleanKey,sess,p=>setProgress(p));
+      onSuccess?.(result||{total:0});
+    }catch(e){
+      setErrMsg(e.message||"Sync failed");
+    }finally{
+      setBusy(false);
+    }
+  };
+
+  const pct=progress&&progress.total>0?Math.round((progress.uploaded/progress.total)*100):0;
+
+  return(
+    <div>
+      <h2 style={s.modalTitle}>Sync to Supabase</h2>
+      <p style={{fontSize:13,color:"var(--txt-muted)",marginBottom:16,lineHeight:1.5}}>
+        Move all your local Qoder data into a Supabase project so you can sync across devices.
+        The Supabase project must be empty — local-to-cloud sync into an account that already
+        has projects isn't supported.
+      </p>
+      <Field label="Project URL">
+        <QInput className="q-input" value={url} onChange={e=>{setUrl(e.target.value);setErrMsg("");}} placeholder="https://xxxx.supabase.co" disabled={busy}/>
+      </Field>
+      <Field label="Anon / Public Key">
+        <QInput className="q-input" value={key} onChange={e=>{setKey(e.target.value);setErrMsg("");}} placeholder="eyJhbGciOiJ…" style={{fontFamily:"'JetBrains Mono'",fontSize:12}} disabled={busy}/>
+      </Field>
+      <Field label="Email">
+        <QInput className="q-input" type="email" value={email} onChange={e=>{setEmail(e.target.value);setErrMsg("");}} placeholder="you@example.com" disabled={busy}/>
+      </Field>
+      <Field label="Password">
+        <div style={{position:"relative"}}>
+          <QInput className="q-input" type={showPw?"text":"password"} value={pw} onChange={e=>{setPw(e.target.value);setErrMsg("");}} placeholder="••••••••" style={{paddingRight:44}} disabled={busy}/>
+          <button onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",color:"#8B8FA8",fontSize:12,background:"none",border:"none",cursor:"pointer"}}>{showPw?"hide":"show"}</button>
+        </div>
+      </Field>
+      <div style={{display:"flex",gap:12,marginTop:6,marginBottom:8,fontSize:12,color:"#8B8FA8"}}>
+        <button onClick={()=>{setIsSignUp(true);setErrMsg("");}} disabled={busy} style={{background:"none",border:"none",cursor:"pointer",color:isSignUp?"#00D4FF":"#8B8FA8",textDecoration:isSignUp?"underline":"none"}}>Create new account</button>
+        <span>·</span>
+        <button onClick={()=>{setIsSignUp(false);setErrMsg("");}} disabled={busy} style={{background:"none",border:"none",cursor:"pointer",color:!isSignUp?"#00D4FF":"#8B8FA8",textDecoration:!isSignUp?"underline":"none"}}>Sign into existing</button>
+      </div>
+      {errMsg&&<div style={{marginTop:8,padding:"9px 12px",background:"rgba(255,70,102,.12)",border:"1px solid rgba(255,70,102,.35)",borderRadius:8,color:"#FF4466",fontSize:13,fontFamily:"'JetBrains Mono'",lineHeight:1.5}}>{errMsg}</div>}
+      {progress&&(
+        <div style={{marginTop:12,padding:"10px 14px",background:"rgba(0,212,255,.06)",border:"1px solid rgba(0,212,255,.25)",borderRadius:8}}>
+          <div style={{fontSize:12,color:"var(--accent)",fontFamily:"'JetBrains Mono'",marginBottom:6}}>
+            {progress.phase==="done"?`Done — uploaded ${progress.uploaded} record${progress.uploaded===1?"":"s"}`:
+             progress.phase==="resume"?`Resuming previous sync (${progress.foundCloudRows} record${progress.foundCloudRows===1?"":"s"} already in cloud — they'll be merged)…`:
+             progress.phase==="start"?`Starting upload (${progress.total} record${progress.total===1?"":"s"})…`:
+             `Uploading ${progress.table}… ${progress.uploaded}/${progress.total}`}
+          </div>
+          <div style={{height:4,background:"rgba(255,255,255,.08)",borderRadius:2,overflow:"hidden"}}>
+            <div style={{height:"100%",width:`${pct}%`,background:"var(--accent)",transition:"width .2s ease"}}/>
+          </div>
+        </div>
+      )}
+      <div style={{display:"flex",gap:8,marginTop:18,justifyContent:"flex-end"}}>
+        <button onClick={onCancel} disabled={busy} style={{padding:"9px 16px",background:"none",border:"1px solid rgba(255,255,255,.12)",borderRadius:8,color:"#8B8FA8",fontSize:13,cursor:busy?"not-allowed":"pointer"}}>Cancel</button>
+        <button className="q-btn-primary" onClick={run} disabled={busy||!allFilled} style={{padding:"9px 18px",opacity:(busy||!allFilled)?.6:1}}>
+          {busy?(progress?"Uploading…":"Authenticating…"):isSignUp?"Create & Sync →":"Sign In & Sync →"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ── RefreshBtn ───────────────────────────────────────────────────────────────
