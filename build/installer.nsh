@@ -27,6 +27,17 @@
   Sleep 1000
 !macroend
 
+; customInit fires AFTER electron-builder's CHECK_APP_RUNNING but BEFORE the
+; install section runs the old version's silent uninstaller. By this point
+; preInit has already killed processes, but Windows Defender / Search Indexer
+; can hold transient file handles for a couple seconds after a process dies.
+; This second taskkill + extra sleep is belt-and-suspenders insurance for the
+; tiny window between "process dies" and "old uninstaller tries to delete."
+!macro customInit
+  nsExec::Exec 'taskkill /F /T /IM "Qoder.exe"'
+  Sleep 2000
+!macroend
+
 ; Uninstaller path — customUnInit runs early in the uninstaller's .onInit.
 ; There is no preUnInit macro, so this is the correct hook. Same multi-pass
 ; kill strategy so a future installer invoking THIS uninstaller silently
