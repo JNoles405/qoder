@@ -1543,6 +1543,7 @@ export default function QoderApp() {
   const deleteWorkspaceNote=(id)=>saveWorkspace({...workspace,notes:workspace.notes.filter(n=>n.id!==id)});
   const addWorkspaceIdea=(content)=>saveWorkspace({...workspace,ideas:[{id:Date.now()+"",content,pinned:false,createdAt:new Date().toISOString()},...workspace.ideas]});
   const pinWorkspaceIdea=(id)=>saveWorkspace({...workspace,ideas:workspace.ideas.map(i=>i.id===id?{...i,pinned:!i.pinned}:i)});
+  const editWorkspaceIdea=(id,content)=>saveWorkspace({...workspace,ideas:workspace.ideas.map(i=>i.id===id?{...i,content}:i)});
   const deleteWorkspaceIdea=(id)=>saveWorkspace({...workspace,ideas:workspace.ideas.filter(i=>i.id!==id)});
   const addWorkspaceSnippet=(title,content,language)=>saveWorkspace({...workspace,snippets:[{id:Date.now()+"",title,content,language:language||"javascript",pinned:false,createdAt:new Date().toISOString()},...workspace.snippets]});
   const pinWorkspaceSnippet=(id)=>saveWorkspace({...workspace,snippets:workspace.snippets.map(s=>s.id===id?{...s,pinned:!s.pinned}:s)});
@@ -2302,6 +2303,7 @@ export default function QoderApp() {
   // ── Issue / Todo priority ─────────────────────────────────────────────────────
   const updateIssuePriority=async(pid,iid,priority)=>{try{await sb.patch(cfg.url,cfg.key,T(),"issues",iid,{priority});mutate(pid,p=>({...p,issues:p.issues.map(i=>i.id===iid?{...i,priority}:i)}));}catch(e){showToast(e.message,"err");}};
   const updateTodoPriority=async(pid,tid,priority)=>{try{await sb.patch(cfg.url,cfg.key,T(),"todos",tid,{priority});mutate(pid,p=>({...p,todos:p.todos.map(t=>t.id===tid?{...t,priority}:t)}));}catch(e){showToast(e.message,"err");}};
+  const updateTodoText=async(pid,tid,text)=>{try{await sb.patch(cfg.url,cfg.key,T(),"todos",tid,{text});mutate(pid,p=>({...p,todos:p.todos.map(t=>t.id===tid?{...t,text}:t)}));}catch(e){showToast(e.message,"err");}};
 
   // ── Build Logs ────────────────────────────────────────────────────────────────
   const addBuildLog=async(pid,b)=>{
@@ -2893,11 +2895,17 @@ export default function QoderApp() {
             onDeleteNote={deleteWorkspaceNote}
             onPinNote={pinWorkspaceNote}
             onAddIdea={addWorkspaceIdea}
+            onEditIdea={editWorkspaceIdea}
             onDeleteIdea={deleteWorkspaceIdea}
             onPinIdea={pinWorkspaceIdea}
             onAddSnippet={addWorkspaceSnippet}
             onDeleteSnippet={deleteWorkspaceSnippet}
             onPinSnippet={pinWorkspaceSnippet}
+            projects={projects}
+            onToggleTodo={toggleTodo}
+            onUpdateTodoText={updateTodoText}
+            onDeleteTodo={deleteTodo}
+            onOpenProject={openProject}
             onToast={(m,t)=>showToast(m,t)}
             isMobile={isMobile}
           />}
@@ -3324,16 +3332,29 @@ function DraggableSidebarList({items,onReorder,children}){
 }
 
 // ── Workspace View (global scratch — not tied to any project) ─────────────────
-function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onPinNote,onAddIdea,onDeleteIdea,onPinIdea,onAddSnippet,onDeleteSnippet,onPinSnippet,onToast,isMobile}){
-  const [tab,setTab]=useState("notes"); // notes|ideas|snippets
+function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onPinNote,onAddIdea,onEditIdea,onDeleteIdea,onPinIdea,onAddSnippet,onDeleteSnippet,onPinSnippet,projects=[],onToggleTodo,onUpdateTodoText,onDeleteTodo,onOpenProject,onToast,isMobile}){
+  const [tab,setTab]=useState("notes"); // notes|ideas|snippets|tasks
   const [noteText,setNoteText]=useState("");
   const [editingNote,setEditingNote]=useState(null);
   const [editText,setEditText]=useState("");
+  const [editingIdea,setEditingIdea]=useState(null);
+  const [editIdeaText,setEditIdeaText]=useState("");
+  const [editingTodo,setEditingTodo]=useState(null); // {pid, tid}
+  const [editTodoText,setEditTodoText]=useState("");
+  const [showCompletedTodos,setShowCompletedTodos]=useState(false);
   const [ideaText,setIdeaText]=useState("");
   const [snippetTitle,setSnippetTitle]=useState("");
   const [snippetContent,setSnippetContent]=useState("");
   const [snippetLang,setSnippetLang]=useState("javascript");
   const [showSnippetForm,setShowSnippetForm]=useState(false);
+
+  // Aggregate cross-project todos for the "Tasks" tab. Pending count is what
+  // shows in the tab pill — completed are hidden by default so the badge
+  // reflects "things you still need to do" rather than "things you've ever done".
+  const todoProjects=(projects||[])
+    .map(p=>({project:p,todos:(p.todos||[])}))
+    .filter(g=>g.todos.length>0);
+  const totalPending=todoProjects.reduce((n,g)=>n+g.todos.filter(t=>!t.completed).length,0);
 
   // Use same sorted language list as project snippets
 
@@ -3347,8 +3368,13 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onPinNote,on
       </div>
 
       {/* Tab bar */}
-      <div style={{display:"flex",gap:4,marginBottom:24,borderBottom:"1px solid var(--border)",paddingBottom:0}}>
-        {[{key:"notes",label:"Notes",count:workspace.notes.length},{key:"ideas",label:"Ideas",count:workspace.ideas.length},{key:"snippets",label:"Snippets",count:workspace.snippets.length}].map(t=>(
+      <div style={{display:"flex",gap:4,marginBottom:24,borderBottom:"1px solid var(--border)",paddingBottom:0,flexWrap:"wrap"}}>
+        {[
+          {key:"notes",label:"Notes",count:workspace.notes.length},
+          {key:"ideas",label:"Ideas",count:workspace.ideas.length},
+          {key:"snippets",label:"Snippets",count:workspace.snippets.length},
+          {key:"tasks",label:"Tasks",count:totalPending},
+        ].map(t=>(
           <button key={t.key} onClick={()=>setTab(t.key)} style={{padding:"9px 18px",fontSize:13,background:"none",border:"none",borderBottom:tab===t.key?"2px solid var(--accent)":"2px solid transparent",color:tab===t.key?"var(--accent-text)":"var(--txt-muted)",cursor:"pointer",fontFamily:"'Syne'",fontWeight:500,transition:"all .15s",marginBottom:-1}}>
             {t.label}{t.count>0&&<span style={{...s.tabPill,marginLeft:6}}>{t.count}</span>}
           </button>
@@ -3421,12 +3447,27 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onPinNote,on
             const unpinnedI=workspace.ideas.filter(i=>!i.pinned);
             const renderIdea=(idea)=>(
               <div key={idea.id} style={{background:"var(--bg-card)",border:`1px solid ${idea.pinned?"#FFB347":"var(--border)"}`,borderLeft:`3px solid ${idea.pinned?"#FFB347":"#B47FFF"}`,borderRadius:10,padding:14,position:"relative"}}>
-                <div style={{position:"absolute",top:8,right:8,display:"flex",gap:3}}>
-                  <button title={idea.pinned?"Unpin":"Pin"} onClick={()=>onPinIdea&&onPinIdea(idea.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,opacity:idea.pinned?1:.4,padding:"2px 4px",transition:"opacity .15s"}} onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=idea.pinned?1:.4}><PinIcon size={13} active={idea.pinned}/></button>
-                  <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this idea?"))onDeleteIdea(idea.id);}}>✕</button>
-                </div>
-                <p style={{color:"var(--txt-sub)",fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap",paddingRight:52}}>{idea.content}</p>
-                <div style={{...s.mono10,color:"var(--txt-dim)",marginTop:8}}>{new Date(idea.createdAt).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+                {editingIdea===idea.id?(
+                  <>
+                    <QTextarea className="q-input" style={{minHeight:70,resize:"vertical",marginBottom:8}} value={editIdeaText} onChange={e=>setEditIdeaText(e.target.value)} autoFocus/>
+                    <div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+                      <button className="q-btn-ghost" style={{padding:"5px 12px",fontSize:12}} onClick={()=>setEditingIdea(null)}>Cancel</button>
+                      <button className="q-btn-primary" style={{padding:"5px 14px",fontSize:12}} onClick={()=>{const t=editIdeaText.trim();if(t&&onEditIdea)onEditIdea(idea.id,t);setEditingIdea(null);}} disabled={!editIdeaText.trim()}>Save</button>
+                    </div>
+                  </>
+                ):(
+                  <>
+                    <p style={{color:"var(--txt-sub)",fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap",paddingRight:8,marginBottom:8}}>{idea.content}</p>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      <span style={{...s.mono10,color:"var(--txt-dim)"}}>{new Date(idea.createdAt).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
+                      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                        <button title={idea.pinned?"Unpin":"Pin"} onClick={()=>onPinIdea&&onPinIdea(idea.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:13,opacity:idea.pinned?1:.4,padding:"2px 4px",transition:"opacity .15s"}} onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=idea.pinned?1:.4}><PinIcon size={13} active={idea.pinned}/></button>
+                        <button className="q-btn-ghost" style={{padding:"3px 9px",fontSize:11}} onClick={()=>{setEditingIdea(idea.id);setEditIdeaText(idea.content);}}>Edit</button>
+                        <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this idea?"))onDeleteIdea(idea.id);}}>✕</button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             );
             return(<>
@@ -3434,6 +3475,78 @@ function WorkspaceView({workspace,onAddNote,onEditNote,onDeleteNote,onPinNote,on
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>{unpinnedI.map(renderIdea)}</div>
             </>);
           })()}
+        </div>
+      )}
+
+      {/* Tasks — combined cross-project to-do list, grouped by project */}
+      {tab==="tasks"&&(
+        <div>
+          {todoProjects.length===0?(
+            <div style={s.empty}><p>No to-dos in any project yet. Open a project and add some on its To-Dos tab.</p></div>
+          ):(
+            <>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:12}}>
+                <div style={{color:"var(--txt-muted)",fontSize:13}}>
+                  <strong style={{color:"var(--txt)"}}>{totalPending}</strong> pending across <strong style={{color:"var(--txt)"}}>{todoProjects.filter(g=>g.todos.some(t=>!t.completed)).length}</strong> project{todoProjects.filter(g=>g.todos.some(t=>!t.completed)).length===1?"":"s"}
+                </div>
+                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--txt-muted)",cursor:"pointer"}}>
+                  <input type="checkbox" checked={showCompletedTodos} onChange={e=>setShowCompletedTodos(e.target.checked)}/>
+                  Show completed
+                </label>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                {todoProjects.map(({project,todos})=>{
+                  // Pending first (sorted by position), then completed if shown.
+                  const pending=todos.filter(t=>!t.completed).slice().sort((a,b)=>(a.position||0)-(b.position||0));
+                  const done=todos.filter(t=>t.completed).slice().sort((a,b)=>new Date(b.completedAt||0)-new Date(a.completedAt||0));
+                  const visible=showCompletedTodos?[...pending,...done]:pending;
+                  if(visible.length===0)return null;
+                  const accent=project.color||"var(--accent)";
+                  return(
+                    <div key={project.id} style={{background:"var(--bg-card)",border:"1px solid var(--border)",borderLeft:`3px solid ${accent}`,borderRadius:10,overflow:"hidden"}}>
+                      <div style={{padding:"10px 14px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                        <button onClick={()=>onOpenProject?.(project,"todos")} style={{background:"none",border:"none",cursor:"pointer",padding:0,display:"flex",alignItems:"center",gap:8,fontFamily:"'Syne'",fontWeight:600,fontSize:14,color:"var(--txt)",textAlign:"left"}}>
+                          <span style={{width:8,height:8,borderRadius:"50%",background:accent,flexShrink:0,display:"inline-block"}}/>
+                          <span style={{textDecoration:"underline",textDecorationColor:"transparent",transition:"text-decoration-color .15s"}} onMouseEnter={e=>e.currentTarget.style.textDecorationColor=accent} onMouseLeave={e=>e.currentTarget.style.textDecorationColor="transparent"}>{project.name}</span>
+                        </button>
+                        <span style={{...s.mono10,color:"var(--txt-faint)"}}>
+                          {pending.length} pending{showCompletedTodos&&done.length>0?` · ${done.length} done`:""}
+                        </span>
+                      </div>
+                      <div style={{display:"flex",flexDirection:"column"}}>
+                        {visible.map(todo=>{
+                          const isEditing=editingTodo&&editingTodo.pid===project.id&&editingTodo.tid===todo.id;
+                          return(
+                            <div key={todo.id} style={{padding:"9px 14px",borderTop:"1px solid var(--border)",display:"flex",alignItems:isEditing?"flex-start":"center",gap:10,opacity:todo.completed?.55:1}}>
+                              <input type="checkbox" checked={!!todo.completed} onChange={()=>onToggleTodo?.(project.id,todo.id)} style={{marginTop:isEditing?6:0,cursor:"pointer",flexShrink:0}}/>
+                              {isEditing?(
+                                <div style={{flex:1,display:"flex",flexDirection:"column",gap:6}}>
+                                  <QInput className="q-input" value={editTodoText} onChange={e=>setEditTodoText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&editTodoText.trim()){onUpdateTodoText?.(project.id,todo.id,editTodoText.trim());setEditingTodo(null);}else if(e.key==="Escape"){setEditingTodo(null);}}} autoFocus/>
+                                  <div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+                                    <button className="q-btn-ghost" style={{padding:"4px 10px",fontSize:11}} onClick={()=>setEditingTodo(null)}>Cancel</button>
+                                    <button className="q-btn-primary" style={{padding:"4px 12px",fontSize:11}} disabled={!editTodoText.trim()} onClick={()=>{onUpdateTodoText?.(project.id,todo.id,editTodoText.trim());setEditingTodo(null);}}>Save</button>
+                                  </div>
+                                </div>
+                              ):(
+                                <>
+                                  <span style={{flex:1,fontSize:13,color:"var(--txt-sub)",textDecoration:todo.completed?"line-through":"none",lineHeight:1.5}}>{todo.text}</span>
+                                  {todo.priority&&todo.priority!=="medium"&&(
+                                    <span style={{...s.badge,fontSize:10,padding:"2px 7px",background:todo.priority==="high"?"rgba(255,70,102,.12)":"rgba(74,222,128,.12)",color:todo.priority==="high"?"#FF4466":"#4ADE80",flexShrink:0}}>{todo.priority}</span>
+                                  )}
+                                  <button className="q-btn-ghost" style={{padding:"3px 9px",fontSize:11,flexShrink:0}} onClick={()=>{setEditingTodo({pid:project.id,tid:todo.id});setEditTodoText(todo.text);}}>Edit</button>
+                                  <button className="q-del" onClick={async()=>{if(await qConfirm("Delete this to-do?"))onDeleteTodo?.(project.id,todo.id);}}>✕</button>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       )}
 
